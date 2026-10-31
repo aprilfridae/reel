@@ -11,6 +11,7 @@
   :root {
     color-scheme: dark;
     --u: 16px;
+    --r: 3px; /* corner radius */
     --fg: #fff; --bg: #000;
     --line: 1px solid #fff;
     --dim: #fff; /* (no greys: emphasis is by weight, underline and inversion, not by colour) */
@@ -52,13 +53,13 @@
   h3 { font-size: 12px; font-weight: 700; margin: var(--u) 0; text-decoration: underline; }
 
   button { font: inherit; color: var(--fg); background: transparent; border: var(--line); height: 40px; padding: 0 var(--u);
-           cursor: pointer; border-radius: 0; font-weight: 700; }
+           cursor: pointer; border-radius: var(--r); font-weight: 700; }
   button:hover, button:focus-visible { background: #fff; color: #000; outline: none; }
   button:active { opacity: .7; }
   button:disabled { opacity: .4; cursor: default; background: transparent; color: var(--fg); }
   button.ghost { font-weight: 400; }
   input, select { font: inherit; color: var(--fg); background: var(--bg); border: var(--line); height: 40px; padding: 0 var(--u);
-                  border-radius: 0; min-width: 0; outline: none; }
+                  border-radius: var(--r); min-width: 0; outline: none; }
   input:focus, select:focus { outline: 1px solid #fff; outline-offset: 2px; }
   input::placeholder { color: #fff; opacity: .5; }
   input[type=checkbox] { height: auto; }
@@ -137,6 +138,11 @@
   .who-row .no.n1 { background: #fff; color: #000; }
   .who-row .nm { flex: 1; font-weight: 700; word-break: break-word; }
   .who-row .on { font-size: 12px; }
+  /* every outlined box gets the same 3px corners */
+  section, .card, .one, .balance, .bidbox, .chat, .who-row, .who-row .no, .serial, .chip, .pill, .switch .track,
+  .switch .thumb, .bidbox .dot { border-radius: var(--r); }
+  .card, .one { overflow: hidden; }
+  .req img { border-radius: var(--r); }
 </style>
 </head>
 <body>
