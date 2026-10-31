@@ -372,10 +372,11 @@ class Game:
         middle = (w * 0.15, h * 0.05, w * 0.85, h * 0.95)
         return any(self.find(n, img, 0.85, region=middle, optional=True) for n in MENU_CLOSE_BUTTONS)
 
-    def scroll(self, x, y, notches):
+    def scroll(self, x, y, notches, check=True):
         """Scroll a menu: positive up, negative down. Refused if no menu is open,
-        since the wheel over the game world zooms the camera."""
-        if not self.menu_open():
+        since the wheel over the game world zooms the camera. (check=False skips that
+        look, for a caller that has just made sure the menu is open: it takes ~0.3s.)"""
+        if check and not self.menu_open():
             print("Not scrolling: no menu open (it would zoom the camera).")
             return False
         self.focus()

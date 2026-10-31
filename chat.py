@@ -8,11 +8,12 @@ import re
 import time
 from difflib import SequenceMatcher
 
+import cv2
 import numpy as np
 
 import webstate
 from game import INPUT, KEYBDINPUT, _send
-from ocr import read_rows
+from ocr import read_rows, read_words
 
 CHAT_BOX = (0.0, 0.05, 0.24, 0.38)  # fractions of the window: x0, y0, x1, y1
 SC_SLASH, SC_ENTER = 0x35, 0x1C
@@ -161,6 +162,61 @@ def _junky(text):
             bad += 1  # punctuation in the middle of a word ("c.ybersecurity")
     letters = sum(c.isalpha() for c in text)
     return bad > 0 or letters < 2 or (len(text) >= 6 and letters / len(text) < 0.55)
+
+
+CHAT_ICON = (138, 34)  # the speech-bubble button in the top-left corner, at UI scale 1
+_hidden_by_us = False
+
+
+def window_open(game, img=None):
+    """Is Roblox's chat window showing (its Here / Global / Friends tabs)? It pops up when
+    something is typed or said and fades after a while."""
+    img = game.frame() if img is None else img
+    h, w = img.shape[:2]
+    words = {t.lower() for t, x, y in read_words(img[:int(h * 0.45), :int(w * 0.3)], scale=2)}
+    return "global" in words and "friends" in words
+
+
+def chat_enabled(game, img=None):
+    """Is chat switched on? The speech-bubble button is a solid white bubble when it is and
+    an outline when it isn't. While it's on, chat text (even the faded kind) is drawn over
+    the top-left and takes clicks that land there."""
+    img = game.frame() if img is None else img
+    s = game.ui_scale(img)
+    cx, cy, r = int(CHAT_ICON[0] * s), int(CHAT_ICON[1] * s), int(14 * s)
+    icon = cv2.cvtColor(img[cy - r:cy + r, cx - r:cx + r], cv2.COLOR_BGR2GRAY)
+    return float((icon > 200).mean()) > 0.25
+
+
+def hide_window(game):
+    """Close the chat window while something else needs the top-left of the screen (the
+    open chat covers part of the Card Market). Clicking the chat button switches chat off
+    until it's clicked again (restore_window does that)."""
+    global _hidden_by_us
+    if _hidden_by_us or not chat_enabled(game):
+        return False
+    s = game.ui_scale(game.frame())
+    for _ in range(2):
+        game.click(CHAT_ICON[0] * s, CHAT_ICON[1] * s)
+        game.park_mouse()
+        game.wait(0.8)
+        if not chat_enabled(game):
+            _hidden_by_us = True
+            break
+    return _hidden_by_us
+
+
+def restore_window(game):
+    """Switch chat back on if hide_window switched it off."""
+    global _hidden_by_us
+    if not _hidden_by_us:
+        return False
+    s = game.ui_scale(game.frame())
+    game.click(CHAT_ICON[0] * s, CHAT_ICON[1] * s)
+    game.park_mouse()
+    game.wait(0.6)
+    _hidden_by_us = False
+    return True
 
 
 class Chat:

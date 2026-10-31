@@ -138,14 +138,34 @@ def _answer_market_warning(game, warning):
     """Click REBIRTH ANYWAY (or CANCEL when forfeiting bids isn't allowed). Returns the
     coins forfeited as text, or None if it was cancelled."""
     words, coins = warning
-    want = "anyway" if ALLOW_BID_LOSS else "cancel"
-    spot = next(((x, y) for t, x, y in words if t.lower().strip("'\".") == want), None)
+    saved = webstate.load("mode.json", {}).get("bid_anyway")  # the website's "Rebirth anyway" switch
+    allow = saved if isinstance(saved, bool) else ALLOW_BID_LOSS
+    webstate.save("bids_seen.json", {"coins": coins, "at": time.strftime("%H:%M:%S"), "went_ahead": allow})
+    spot = _warning_button(words, "anyway" if allow else "cancel")
     if not spot:
-        return None
+        raise RuntimeError("the Market-bids warning is up but its buttons couldn't be found")
     game.click(*spot)
     game.park_mouse()
     game.wait(0.8)
-    return coins if ALLOW_BID_LOSS else None
+    return coins if allow else None
+
+
+def _warning_button(words, which):
+    """Where to click REBIRTH ANYWAY ("anyway") or CANCEL ("cancel") on the warning. The
+    words are read by OCR, so the name is matched loosely, and if it isn't there at all the
+    other button's position is used (the two sit side by side, about 466 px apart at UI scale 1)."""
+    from difflib import SequenceMatcher
+
+    def find(name):
+        # (the two words of "REBIRTH ANYWAY" are often read as one: "'REBIRTHANYWAY")
+        best = max(((1.0 if name in t.lower() else SequenceMatcher(None, t.lower().strip("'\".!"), name).ratio(), x, y)
+                    for t, x, y in words), default=None)
+        return (best[1], best[2]) if best and best[0] >= 0.7 else None
+
+    anyway, cancel = find("anyway"), find("cancel")
+    if which == "anyway":
+        return anyway or (cancel[0] - 466, cancel[1]) if cancel or anyway else None
+    return cancel or (anyway[0] + 466, anyway[1]) if cancel or anyway else None
 
 
 def rebirth_once(game, dry_run=False):
@@ -160,10 +180,22 @@ def rebirth_once(game, dry_run=False):
     button = _button(game)
     if not button:
         return False, "couldn't find the REBIRTH button"
-    game.click(*button)  # first click: asks "are you SURE"
-    game.park_mouse()
-    game.wait(0.7)
-    armed = _asks_to_confirm(game)
+    armed = False
+    for attempt in range(3):
+        game.click(*button)  # first click: asks "are you SURE"
+        game.park_mouse()
+        game.wait(0.7 if attempt == 0 else 1.0)
+        armed = _asks_to_confirm(game)
+        if armed:
+            break
+        # Nothing showed: the menu was still settling after the last rebirth, or the click
+        # was missed. Look again, then click again (unless it already went through).
+        now = read_state(game)
+        if now["rebirths"] is not None and now["rebirths"] > before["rebirths"]:
+            publish(now)
+            return True, f"rebirth #{now['rebirths']} done for {before['cost']} (luck now x{now['luck_now']})"
+        game.wait(0.8)
+        button = _button(game) or button
     if dry_run:
         game.wait(0.3)
         return armed, (f"dry run: rebirth #{before['rebirths'] + 1} for {before['cost']}; the 'are you sure' "
@@ -174,10 +206,18 @@ def rebirth_once(game, dry_run=False):
         game.park_mouse()
         warning = _market_warning(game)  # third screen, only with active Market bids
         if warning:
-            lost = _answer_market_warning(game, warning)
+            try:
+                lost = _answer_market_warning(game, warning)
+            except RuntimeError as e:
+                try:
+                    import cv2
+                    cv2.imwrite(os.path.join(HERE, "rebirth_stuck.png"), game.frame())
+                except Exception:
+                    pass
+                return False, f"{e} (words seen: {' '.join(t for t, _, _ in warning[0])[:300]})"
             if lost is None:
                 return False, (f"active Market bids ({warning[1]} coins) would be lost in a rebirth; "
-                               "cancelled (turn on rebirth_forfeits_bids in config.json to allow it)")
+                               "cancelled (turn on \"Rebirth anyway\" on the website to allow it)")
     # (no prompt: maybe it went straight through; the counter below tells either way)
     note = f"; {lost} coins in Market bids forfeited" if lost else ""
     for _ in range(8):
@@ -223,6 +263,7 @@ def rebirth_many(game, count, budget=None, should_stop=lambda: False, dry_run=Fa
                 break
             done += 1
             spent += state["cost_value"]
+            game.wait(1.5)  # let the menu settle before the next one
             if dry_run:
                 break  # reading the price after the first one tells nothing new
     finally:

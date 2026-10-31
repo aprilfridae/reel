@@ -12,6 +12,7 @@ import time
 
 import cv2
 
+import chat
 from game import HERE
 from ocr import read_words
 from packs import close_any_menu, close_popup, teleport
@@ -96,6 +97,34 @@ def _try_prompt(game):
     return False
 
 
+def ensure_browse_tab(game):
+    """The market opens on whichever tab was used last (My Listings, Requests...), but
+    scanning and bidding need Browse, so click it. The chat window, if it's up, covers the
+    Browse tab and the first column of cards, so it's closed first."""
+    chat.hide_window(game)
+    for _ in range(4):
+        img = game.frame()
+        words = read_words(img, scale=2)
+        if _on_browse(words, img):
+            return True
+        h, w = img.shape[:2]
+        s = game.ui_scale(img)
+        # Normally found by reading its name, but chat text drawn over the tab can hide it,
+        # so fall back to where the tab always is (the market window is centred)
+        spot = next(((x, y) for t, x, y in words if t.lower().startswith("brow") and y < h * 0.3),
+                    (w / 2 - 539 * s, h / 2 - 294 * s))
+        game.click(*spot)
+        game.park_mouse()
+        game.wait(1.2)
+    return _on_browse(read_words(game.frame(), scale=2), game.frame())
+
+
+def _on_browse(words, img):
+    """The Browse tab is showing when its filter chips (All / Rarities / Event / Ultra) are."""
+    names = {t.lower() for t, x, y in words if y < img.shape[0] * 0.35}
+    return "rarities" in names and "ultra" in names
+
+
 def go_to_market(game, log=print, attempts=3):
     """Teleport to Spawn, replay the recorded walk, open the market. True if open."""
     for attempt in range(1, attempts + 1):
@@ -105,6 +134,7 @@ def go_to_market(game, log=print, attempts=3):
             continue
         walk_route(game)
         if _try_prompt(game):
+            ensure_browse_tab(game)
             return True
         cv2.imwrite(f"{HERE}/market_fail_{attempt}.png", game.frame())
         log(f"Market attempt {attempt} didn't work; " + ("trying again" if attempt < attempts else "giving up"))

@@ -13,6 +13,7 @@ import uuid
 from flask import Flask, jsonify, request, send_from_directory
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import config  # noqa: E402
 import webstate  # noqa: E402
 from paths import APP, RES  # noqa: E402
 
@@ -23,6 +24,55 @@ app = Flask(__name__, static_folder=os.path.join(APP, "web", "static"))
 @app.get("/")
 def index():
     return send_from_directory(os.path.join(RES, "web"), "index.html")
+
+
+_UNITS = {"K": 1e3, "M": 1e6, "B": 1e9, "T": 1e12, "Q": 1e15}
+
+
+def _value(text):
+    """'200B' / '1.5T' -> number (0 if it can't be read)."""
+    try:
+        t = str(text).strip().upper().replace(",", "")
+        return float(t[:-1]) * _UNITS[t[-1]] if t and t[-1] in _UNITS else float(t)
+    except (ValueError, IndexError):
+        return 0.0
+
+
+def _short(v):
+    for unit, size in (("Q", 1e15), ("T", 1e12), ("B", 1e9), ("M", 1e6), ("K", 1e3)):
+        if v >= size:
+            return f"{v / size:.1f}".rstrip("0").rstrip(".") + unit
+    return str(int(v))
+
+
+def active_bids(market, requests, now):
+    """Bids placed from this website that are probably still running: the listing is still
+    in the last market scan and hasn't ended, or it isn't in the scan but the bid was placed
+    after that scan (and under 12 hours ago). The game's own count (it shows when a rebirth
+    is attempted) is in rebirth.json."""
+    cards = market.get("cards", [])
+    scanned = market.get("scanned_ts", 0)
+    found = []
+    for r in requests:
+        if r.get("kind") != "bid" or r.get("status") != "done":
+            continue
+        c = r.get("card", {})
+        try:
+            placed = time.mktime(time.strptime(r["asked_at"], "%Y-%m-%d %H:%M:%S"))
+        except (KeyError, ValueError):
+            continue
+        live = next((m for m in cards if m.get("seller") == c.get("seller") and str(m.get("serial")) == str(c.get("serial"))
+                     and m.get("name") == c.get("name")), None)
+        if live is not None:
+            ok = not live.get("ends_ts") or live["ends_ts"] > now
+        else:
+            ok = placed > scanned and now - placed < 12 * 3600
+        if ok:
+            found.append(r)
+    total = sum(_value(r.get("amount")) for r in found)
+    return {"count": len(found), "total": _short(total) if found else "0",
+            "items": [{"amount": r["amount"], "serial": r.get("card", {}).get("serial"),
+                       "seller": r.get("card", {}).get("seller")} for r in found]}
 
 
 @app.get("/api/state")
@@ -42,6 +92,10 @@ def state():
         "balance": webstate.load("balance.json", {}),
         "rebirth": webstate.load("rebirth.json", {}),
         "mode": webstate.load("mode.json", {}),
+        "bids": active_bids(market, webstate.load("requests.json", []), now),
+        "mybids": webstate.load("mybids.json", {}),
+        "bid_anyway": bid_anyway(),
+        "bids_seen": webstate.load("bids_seen.json", {}),
         "now": time.time(),  # so the page's countdowns use this PC's clock
     })
 
@@ -68,6 +122,19 @@ def add_request():
     }
     webstate.update("requests.json", [], lambda r: r + [req])
     return jsonify(req)
+
+
+def bid_anyway():
+    """Rebirth even with coins in Market bids (they're lost)? The website's switch, else config.json."""
+    saved = webstate.load("mode.json", {}).get("bid_anyway")
+    return saved if isinstance(saved, bool) else bool(config.load()["rebirth_forfeits_bids"])
+
+
+@app.post("/api/bidanyway")
+def set_bid_anyway():
+    on = bool(request.get_json(force=True).get("on"))
+    webstate.update("mode.json", {}, lambda m: {**m, "bid_anyway": on})
+    return jsonify(on=on)
 
 
 @app.post("/api/mode")

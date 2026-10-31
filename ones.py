@@ -18,6 +18,7 @@ import time
 import cv2
 import numpy as np
 
+import packs
 import webstate
 from packs import number_one_hits
 
@@ -29,17 +30,36 @@ CARD_LEFT, CARD_TOP, CARD_W, CARD_H = -36, -48, 174, 234
 ART = (14, 22, 118, 108)  # the artwork inside the crop: x, y, w, h
 
 
+_SCALE_AT = {}  # UI scale -> the badge template scale that matched there
+LAST_CUT = 0  # in the last card_crops call: #1 badges seen whose card is cut off at the bottom
+
+
 def card_crops(img, s=1.0, rows=None):
     """[(crop, (x, y), score)] for every #1 card whose whole card is on screen; (x, y)
     is where its badge is. rows = (top, bottom) of the area the cards are in: a card cut
     off by that edge is skipped (it's picked up at another scroll position)."""
+    global LAST_CUT
+    LAST_CUT = 0
     h, w = img.shape[:2]
     top, bottom = rows or (0, h)
     out = []
-    for x, y, score in sorted(number_one_hits(img), key=lambda hit: (round(hit[1] / 60), hit[0])):
+    # Only the card area is searched (a fraction of the screen), and once the badge size
+    # at this UI scale is known only sizes near it are tried: the full search over the
+    # whole screen took about a second per picture
+    scales = None
+    if s in _SCALE_AT:
+        b = _SCALE_AT[s]
+        scales = [b - 0.1, b, b + 0.1]
+    t0 = max(0, int(top - 60 * s))
+    hits = [(x, y + t0, sc) for x, y, sc in number_one_hits(img[t0:min(h, int(bottom + 10 * s))], scales=scales)]
+    if scales is None and hits and packs.LAST_BEST_SCALE:
+        _SCALE_AT[s] = packs.LAST_BEST_SCALE
+    for x, y, score in sorted(hits, key=lambda hit: (round(hit[1] / 60), hit[0])):
         x0, y0 = int(x + CARD_LEFT * s), int(y + CARD_TOP * s)
         x1, y1 = x0 + int(CARD_W * s), y0 + int(CARD_H * s)
         if x0 < 0 or x1 > w or y0 < top or y1 > bottom:
+            if y1 > bottom and y0 >= top:
+                LAST_CUT += 1  # a #1 whose card runs off the bottom: more of the list is below
             continue
         out.append((img[y0:y1, x0:x1].copy(), (int(x), int(y)), float(score)))
     return out

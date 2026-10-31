@@ -308,12 +308,28 @@ def _is_wanted(card, want):
     name = _similar(card.get("name"), want.get("name"))
     same_price = bool(want.get("price")) and amount_value(_price(card) or "") == amount_value(want["price"])
     seller = _similar(card.get("seller"), want.get("seller")) if want.get("seller") else 0
-    return name >= 0.8 or (name >= 0.5 and same_price) or (same_price and seller >= 0.6)
+    # (a fancy-font name is often read differently each time, but the seller usually isn't)
+    # (the same seller often lists several cards at the same price, so a seller and price
+    # match alone isn't enough: the name has to be at least a little alike too)
+    return name >= 0.8 or (name >= 0.5 and (same_price or seller >= 0.85))
 
 
-def find_listing(game, want, max_pages=60):
+def find_listing(game, want, tries=3):
+    """find_once, tried again (re-sorting and scrolling back to the top each time) before
+    giving up: one look can miss a listing (the list was still loading, a misread card
+    badge ended the search early) and a bid that fails for that is useless."""
+    for attempt in range(tries):
+        bid, card = _find_once(game, want, strict=attempt > 0)
+        if bid:
+            return bid, card
+        game.wait(1.5)
+    return None, None
+
+
+def _find_once(game, want, strict=False, max_pages=60):
     """Go through the (lowest-serial sorted) market, pressing "Show more" as needed,
-    for the listing the website asked about. Returns (bid_button, card) or (None, None)."""
+    for the listing the website asked about. Returns (bid_button, card) or (None, None).
+    strict: don't stop early on cards that read as past #3 (go through all the pages)."""
     set_sort_lowest_serial(game)
     img = game.frame()
     h, w = img.shape[:2]
@@ -335,7 +351,7 @@ def find_listing(game, want, max_pages=60):
                 return bid, card
             new = True
             past = past + 1 if card["serial"] not in WANTED_SERIALS else 0
-        if past >= STOP_AFTER:
+        if past >= STOP_AFTER * (3 if strict else 2):
             break  # well past #3: it's not on the market anymore
         more = _show_more(img)
         if more:
@@ -367,24 +383,10 @@ def _cancel_dialog(game):
     game.wait(0.6)
 
 
-def _read_amount_box(img, bx, by, s):
-    """Text in the bid amount box. The white text on a dark box is read in a few ways
-    (plain, and with the light text turned black on white) since any one of them can
-    come back empty or drop a digit; the first that looks like an amount wins."""
-    box = img[by - int(15 * s):by + int(15 * s), bx - int(170 * s):bx + int(170 * s)]
-    gray = cv2.cvtColor(box, cv2.COLOR_BGR2GRAY)
-    inverted = np.where(gray > 170, 0, 255).astype(np.uint8)
-    inverted = cv2.copyMakeBorder(inverted, 15, 15, 15, 15, cv2.BORDER_CONSTANT, value=255)
-    for image, scale in ((box, 3), (cv2.cvtColor(inverted, cv2.COLOR_GRAY2BGR), 3), (box, 4)):
-        text = fix_numbers(" ".join(t for t, _, _ in read_words(image, scale=scale))).replace(" ", "")
-        if amount_value(text):
-            return text
-    return ""
-
-
 def place_bid(game, want, amount, dry_run=False):
     """Bid `amount` (e.g. '650B') on the listing. Returns (ok, message).
-    The amount typed into the box is read back and must match before PLACE BID."""
+    The amount is typed by the program (not read back with OCR); the minimum the game
+    shows is checked first, and afterwards that the dialog closed."""
     from ui_keys import clear_field, type_text  # small keyboard helpers
     target = amount_value(amount)
     if not target:
@@ -418,14 +420,24 @@ def place_bid(game, want, amount, dry_run=False):
     clear_field()
     type_text(amount)
     game.wait(0.4)
-    # read the box back before committing
-    img = game.frame()
+    # The text is typed by the program, so it isn't read back with OCR (which can't read a
+    # short number like "5T" anyway). All that's checked is that something did get typed:
+    # the box has white text in it (it's dark and empty otherwise).
     bx, by = int(box[0]), int(box[1])
-    typed = _read_amount_box(img, bx, by, s)
-    if amount_value(typed.replace(" ", "")) != target:
+    for attempt in range(3):
+        img = game.frame()
+        region = img[by - int(14 * s):by + int(14 * s), bx - int(160 * s):bx + int(160 * s)]
+        if (region.min(axis=2) > 200).sum() >= 6 * s * s:
+            break
+        game.click(*box)  # nothing in the box: the click or the typing missed; do it again
+        game.wait(0.3)
+        clear_field()
+        type_text(amount)
+        game.wait(0.4)
+    else:
         cv2.imwrite(os.path.join(HERE, "bid_readback_fail.png"), img)
         _cancel_dialog(game)
-        return False, f"the amount box shows {typed!r}, not {amount}; didn't bid"
+        return False, "typed the amount but the box stayed empty; didn't bid"
     if dry_run:
         _cancel_dialog(game)
         return True, f"dry run: would bid {amount} on {card['name']}"
@@ -463,11 +475,12 @@ def buy_now(game, want, price, dry_run=False):
     # The confirmation window: "Buy <name>?  Price: 1.0T coins  Sold by X" with
     # [Cancel] and a green [BUY 1.0T] button at the bottom
     words = _dialog_words(game)
-    title = [(x, y) for t, x, y in words if t.lower() == "buy"]
+    title = _buy_title(words)
     cancel = [(x, y) for t, x, y in words if t.lower().startswith("cancel")]
     if not title or not cancel:
         _cancel_dialog(game)
         return False, "the buy window didn't open as expected"
+    title = [title]
     shown = _buy_window_price(game, title[0], s)
     if not shown:
         _cancel_dialog(game)
@@ -489,6 +502,23 @@ def buy_now(game, want, price, dry_run=False):
         _cancel_dialog(game)
         return False, "the purchase didn't go through (the buy window stayed open)"
     return True, f"bought {card['name']} for {shown}"
+
+
+def _buy_title(words):
+    """Where "Buy <name>?" is, in the buy window's title. Other words "Buy" are on the
+    screen too (every card says "Buy now", and has a BUY button), so the right one is the
+    "Buy" just above the window's "Price:" line (or, failing that, the one followed by a
+    word ending in "?"). None if the window isn't up."""
+    buys = [(x, y) for t, x, y in words if t.lower() == "buy"]
+    for t, px, py in words:
+        if t.lower().startswith("price:"):  # (cards say "Price history", with no colon)
+            above = [(x, y) for x, y in buys if abs(x - px) < 70 and 15 < py - y < 100]
+            if above:
+                return min(above, key=lambda b: py - b[1])
+    for x, y in buys:
+        if any(t.endswith("?") and abs(wy - y) < 10 and 0 < wx - x < 150 for t, wx, wy in words):
+            return (x, y)
+    return None
 
 
 def _buy_window_price(game, title, s):

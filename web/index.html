@@ -64,6 +64,8 @@
                box-shadow: 0 0 10px rgba(124, 92, 255, .8); margin-right: 2px; }
   h2 { justify-content: flex-start; }
   h2 .muted { margin-left: auto; text-transform: none; letter-spacing: 0; }
+  #tab-ones h2 { flex-wrap: wrap; }
+  #tab-ones h2 .muted { flex-basis: 100%; margin: 4px 0 0; }
   .muted { color: var(--muted); font-size: 13px; font-weight: normal; }
 
   button { font: inherit; border: 0; border-radius: 10px; padding: 8px 14px; cursor: pointer;
@@ -132,7 +134,39 @@
   aside { display: grid; gap: 18px; align-content: start; }
   #rb-count { background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent;
               filter: drop-shadow(0 0 10px rgba(124, 92, 255, .6)); }
+  .fold summary { list-style: none; cursor: pointer; display: block; }
+  .fold summary::-webkit-details-marker { display: none; }
+  .fold summary h2 { margin: 0; }
+  .fold summary h2::after { content: "+"; margin-left: 8px; color: var(--accent2); font-weight: 700; order: 3; }
+  .fold details[open] summary h2 { margin-bottom: 12px; }
+  .fold details[open] summary h2::after { content: "\2212"; }
+  .fold summary:hover h2 { color: #fff; }
+  .leftcol { min-width: 0; display: grid; gap: 14px; align-content: start; }
+  .tabs { display: flex; gap: 8px; }
+  .tab { background: rgba(255,255,255,.04); color: #d9d4ff; border: 1px solid var(--line-strong); }
+  .tab.on { background: var(--grad); color: #0b0a14; border-color: transparent; box-shadow: var(--glow); }
+  .tab .count { margin-left: 6px; padding: 0 7px; border-radius: 99px; background: rgba(0,0,0,.28); color: #fff; font-size: 12px; }
+  .tab .count:empty { display: none; }
+  [hidden] { display: none !important; }
+  h3 { font-size: 12px; margin: 14px 0 8px; text-transform: uppercase; letter-spacing: 1.4px; color: var(--muted); }
+  .card .tag { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+  .pill.winning { color: var(--good); border-color: rgba(74, 222, 128, .45); background: rgba(74, 222, 128, .08); }
+  .pill.outbid { color: var(--bad); border-color: rgba(255, 107, 129, .45); background: rgba(255, 107, 129, .08); }
   #mode-note { min-height: 1.3em; }
+  .bidbox { display: flex; align-items: center; gap: 8px; margin: 12px 0 8px; padding: 8px 12px; font-size: 13px;
+            border-radius: 10px; border: 1px solid var(--line-strong); background: rgba(255, 255, 255, .03); }
+  .bidbox .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--good); box-shadow: 0 0 10px var(--good); flex: none; }
+  .bidbox.has { border-color: rgba(251, 191, 36, .5); background: rgba(251, 191, 36, .07); }
+  .bidbox.has .dot { background: var(--warn); box-shadow: 0 0 10px var(--warn); }
+  .switch { display: flex; align-items: center; gap: 10px; cursor: pointer; user-select: none; font-size: 14px; }
+  .switch input { position: absolute; opacity: 0; width: 0; height: 0; }
+  .switch .track { width: 44px; height: 24px; border-radius: 99px; background: rgba(255, 255, 255, .12); position: relative;
+                   border: 1px solid var(--line-strong); transition: background .2s, box-shadow .2s; flex: none; }
+  .switch .thumb { position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; background: #cfc9f5;
+                   transition: transform .2s, background .2s; }
+  .switch input:checked + .track { background: var(--grad); box-shadow: var(--glow); border-color: transparent; }
+  .switch input:checked + .track .thumb { transform: translateX(20px); background: #fff; }
+  .switch input:focus-visible + .track { outline: 2px solid var(--accent); outline-offset: 2px; }
   .countdown { font-variant-numeric: tabular-nums; }
 </style>
 </head>
@@ -150,10 +184,29 @@
   </div>
 </header>
 <main>
-  <section>
-    <h2>Serial #1–#3 listings <span class="muted" id="scanned"></span></h2>
-    <div class="cards" id="cards"></div>
-  </section>
+  <div class="leftcol">
+    <div class="tabs" id="tabs">
+      <button class="tab on" data-tab="market">Market #1–#3</button>
+      <button class="tab" data-tab="mine">My listings &amp; bids <span class="count" id="mine-count"></span></button>
+      <button class="tab" data-tab="ones">My #1s <span class="count" id="ones-badge"></span></button>
+    </div>
+    <section id="tab-market">
+      <h2>Serial #1–#3 listings <span class="muted" id="scanned"></span></h2>
+      <div class="cards" id="cards"></div>
+    </section>
+    <section id="tab-mine" hidden>
+      <h2>My listings &amp; bids <span class="muted" id="mine-at"></span></h2>
+      <div class="muted" id="mine-sum" style="margin-bottom:10px"></div>
+      <h3>Bids</h3>
+      <div class="cards" id="mine-bids"></div>
+      <h3>My listings</h3>
+      <div class="cards" id="mine-listings"></div>
+    </section>
+    <section id="tab-ones" hidden>
+      <h2>My #1s found, all time <span class="muted" id="ones-count"></span></h2>
+      <div class="ones" id="ones"></div>
+    </section>
+  </div>
   <aside>
     <section>
       <h2>What it's doing</h2>
@@ -175,14 +228,21 @@
         <div><span class="muted">Next costs</span> <b id="rb-cost">?</b></div>
         <div><span class="muted">Luck</span> <b id="rb-luck">?</b></div>
       </div>
+      <div class="bidbox" id="bidbox"><span class="dot"></span><span id="bid-text">Checking bids…</span></div>
+      <label class="switch" title="When you have coins in Market bids, a rebirth asks 'Rebirth anyway?' (those coins are lost). On: it goes ahead. Off: it cancels and tells you.">
+        <input type="checkbox" id="anyway"><span class="track"><span class="thumb"></span></span>
+        <span class="switch-label">Rebirth anyway <span class="muted" id="anyway-note"></span></span>
+      </label>
       <form class="send" id="rb-form" style="margin-top:10px">
         <input id="rb-n" type="number" min="1" max="50" value="1" style="width:70px" title="How many times">
         <button id="rb-go">Rebirth</button>
       </form>
     </section>
-    <section>
-      <h2>Your bids &amp; buys</h2>
-      <div id="requests"></div>
+    <section class="fold">
+      <details id="log-fold">
+        <summary><h2>Your bids &amp; buys log <span class="muted" id="req-count"></span></h2></summary>
+        <div id="requests"></div>
+      </details>
     </section>
     <section>
       <h2>Game chat <span class="muted">read off the screen</span></h2>
@@ -195,12 +255,6 @@
     </section>
   </aside>
 </main>
-<div class="wide">
-  <section>
-    <h2>My #1s found, all time <span class="muted" id="ones-count"></span></h2>
-    <div class="ones" id="ones"></div>
-  </section>
-</div>
 <script>
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
@@ -252,6 +306,7 @@ function renderOnes(list) {
   const byRarity = {};
   list.forEach(o => byRarity[o.rarity] = (byRarity[o.rarity] || 0) + 1);
   const label = (r) => r.charAt(0).toUpperCase() + r.slice(1).replace("_", " ");
+  $("ones-badge").textContent = list.length ? String(list.length) : "";
   $("ones-count").textContent = list.length
     ? `${list.length} total · ` + Object.entries(byRarity).map(([r, n]) => `${n} ${label(r)}`).join(" · ")
     : "";
@@ -271,8 +326,47 @@ function fmtLeft(secs) {
   const h = Math.floor(secs / 3600), m = Math.floor(secs % 3600 / 60), s = Math.floor(secs % 60);
   return (h ? `${h}h ` : "") + (h || m ? `${String(m).padStart(h ? 2 : 1, "0")}m ` : "") + `${String(s).padStart(2, "0")}s`;
 }
+function mineCardHtml(m, at) {
+  const one = m.serial === "1";
+  const label = m.kind === "bid" ? (m.status === "outbid" ? "Outbid at" : "Your bid") : "Price";
+  return `<div class="card">
+    ${m.image ? `<img src="/static/mine/${esc(m.image)}?t=${esc(at)}" alt="">` : ""}
+    <div class="body">
+      <div class="tag"><span class="serial ${one ? "one" : ""}">${m.serial ? "#" + esc(m.serial) : "card"}</span>
+        ${m.status ? `<span class="pill ${esc(m.status)}">${esc(m.status)}</span>` : `<span class="pill">listed</span>`}</div>
+      <div class="name">${esc(m.name || "?")}</div>
+      <div class="row"><span class="k">${label}</span><b>${esc(m.amount)}</b></div>
+      <div class="row"><span class="k">Ends in</span>${m.ends_ts
+        ? `<b class="countdown" data-mine-ends="${m.ends_ts}">${esc(m.time_left)}</b>`
+        : `<span>${esc(m.time_left || "?")}</span>`}</div>
+    </div>
+  </div>`;
+}
+
+function renderMine(mb) {
+  const items = mb.items || [], at = mb.at || "";
+  const bids = items.filter(i => i.kind === "bid"), mine = items.filter(i => i.kind !== "bid");
+  $("mine-count").textContent = items.length ? String(items.length) : "";
+  $("mine-at").textContent = at ? `read from the market at ${at}` : "not read yet";
+  $("mine-sum").textContent = mb.at === undefined ? "The bot reads this at each market check (hourly, or press \"Check market now\")."
+    : `Selling ${mb.selling ?? "?"}/6 · Winning ${mb.winning ?? 0}${mb.total && mb.total !== "0" ? ` (${mb.total} coins)` : ""} · Requests ${mb.requests ?? "?"}/6`;
+  setHtml($("mine-bids"), bids.length ? bids.map(m => mineCardHtml(m, at)).join("") : `<div class="empty">No bids right now.</div>`);
+  setHtml($("mine-listings"), mine.length ? mine.map(m => mineCardHtml(m, at)).join("") : `<div class="empty">You have nothing listed for sale.</div>`);
+}
+
+function showTab(name) {
+  document.querySelectorAll(".tab").forEach(b => b.classList.toggle("on", b.dataset.tab === name));
+  for (const t of ["market", "mine", "ones"]) $("tab-" + t).hidden = name !== t;
+  try { localStorage.setItem("tab", name); } catch {}
+}
+
 function tick() {
   const now = Date.now() / 1000 + clockOffset;
+  document.querySelectorAll("[data-mine-ends]").forEach(el => {
+    const left = +el.dataset.mineEnds - now;
+    el.textContent = left <= 0 ? "ended" : fmtLeft(left);
+    el.style.color = left > 0 && left < 300 ? "var(--bad)" : "";
+  });
   document.querySelectorAll("[data-ends]").forEach(el => {
     const left = +el.dataset.ends - now;
     if (left <= 0) {  // the auction ended: take the card off the page
@@ -299,6 +393,21 @@ async function refresh() {
   document.querySelectorAll("[data-mode]").forEach(b => b.classList.toggle("on", b.dataset.mode === mode));
   $("mode-note").textContent = ({auto: "Following the schedule.", fish: "Only fishing (bids, buys, chat and rebirths still work).",
     pause: "Paused."})[mode] + (queued.length ? ` Queued: ${queued.join(", ")}.` : "");
+  // What the market's own My Listings / Requests tabs said at the last market check
+  // (the "estimate" from bids placed here is only used until that has been read once)
+  const mb = s.mybids || {}, est = s.bids || {count: 0};
+  const known = mb.at !== undefined;
+  const nBids = known ? mb.winning : est.count, nReq = known ? (mb.requests || 0) : 0;
+  const total = known ? mb.total : est.total;
+  const held = nBids > 0 || nReq > 0;
+  $("bidbox").classList.toggle("has", held);
+  $("bid-text").textContent = held
+    ? [nBids > 0 ? `${nBids} winning bid${nBids > 1 ? "s" : ""}` + (total && total !== "0" ? ` (${total} coins)` : "") : "",
+       nReq > 0 ? `${nReq} request${nReq > 1 ? "s" : ""}` : ""].filter(Boolean).join(" + ") + " — lost if you rebirth"
+    : "No coins in bids or requests";
+  $("bid-text").title = known ? `Read from the market at ${mb.at}` : "Estimated from bids placed on this page; the market hasn't been read yet";
+  $("anyway").checked = !!s.bid_anyway;
+  $("anyway-note").textContent = s.bid_anyway ? "(bid coins are lost)" : "(cancels instead)";
   const rb = s.rebirth || {};
   $("rb-count").textContent = rb.rebirths ?? "?";
   $("rb-cost").textContent = rb.cost || "?";
@@ -316,6 +425,8 @@ async function refresh() {
   }
   tick();
 
+  const waiting = s.requests.filter(r => r.status === "waiting" || r.status === "working").length;
+  $("req-count").textContent = s.requests.length ? `${s.requests.length}${waiting ? " · " + waiting + " active" : ""}` : "";
   setHtml($("requests"), s.requests.length ? s.requests.slice().reverse().map(r => `
     <div class="req">${r.card.image ? `<img src="/static/cards/${esc(r.card.image)}" alt="" style="width:40px;border-radius:4px">` : ""}
       <div style="flex:1">${r.kind === "rebirth" ? `<b>Rebirth x${esc(r.amount)}</b>` : `<b>${r.kind === "buy" ? "Buy now" : "Bid " + esc(r.amount)}</b> on #${esc(r.card.serial)} from ${esc(r.card.seller || "?")}`}
@@ -325,6 +436,8 @@ async function refresh() {
     : `<div class="empty">Nothing yet.</div>`);
 
   renderChat(s.chat, s.outbox);
+  renderMine(s.mybids || {});
+  tick();
   renderOnes(s.ones || []);
 }
 
@@ -361,6 +474,8 @@ document.addEventListener("click", async (e) => {
     const c = cards[+t.dataset.buy];
     if (!confirm(`Buy this #${c.serial} card (seller ${c.seller || "?"}) now for ${c.buy_now}?`)) return;
     await post("/api/request", {kind: "buy", amount: c.buy_now, card: c}); refresh();
+  } else if (t.dataset.tab) {
+    showTab(t.dataset.tab);
   } else if (t.dataset.mode) {
     await post("/api/mode", {mode: t.dataset.mode}); refresh();
   } else if (t.dataset.do) {
@@ -373,10 +488,16 @@ document.addEventListener("click", async (e) => {
   }
 });
 
+$("anyway").addEventListener("change", async (e) => {
+  await post("/api/bidanyway", {on: e.target.checked}); refresh();
+});
+
 $("rb-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const count = Math.max(1, Math.min(50, parseInt($("rb-n").value) || 1));
-  if (!confirm(`Rebirth ${count} time${count > 1 ? "s" : ""}? This spends coins.`)) return;
+  const lose = $("anyway").checked && $("bidbox").classList.contains("has")
+    ? `\n\nYou have active bids: "Rebirth anyway" is ON, so those bid coins will be lost.` : "";
+  if (!confirm(`Rebirth ${count} time${count > 1 ? "s" : ""}? This spends coins.${lose}`)) return;
   await post("/api/rebirth", {count}); refresh();
 });
 
@@ -387,6 +508,7 @@ $("send").addEventListener("submit", async (e) => {
   await post("/api/chat", {text}); $("msg").value = ""; refresh();
 });
 
+try { const t = localStorage.getItem("tab"); showTab(["mine", "ones"].includes(t) ? t : "market"); } catch {}
 refresh();
 setInterval(refresh, 5000);
 </script>

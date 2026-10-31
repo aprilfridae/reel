@@ -37,26 +37,38 @@ def _dark(img):
     return np.where(img.max(axis=2) < 70, 255, 0).astype(np.uint8)
 
 
-def number_one_hits(img, threshold=NUMBER1_THRESHOLD):
+LAST_BEST_SCALE = None  # the badge size (template scale) that matched best in the last call
+_SCALED = {}
+
+
+def _scaled_badge(s):
+    """The badge's dark lettering at scale s (kept: it's the same every call)."""
+    key = round(float(s), 2)
+    if key not in _SCALED:
+        _SCALED[key] = _dark(cv2.resize(_BADGE, None, fx=key, fy=key, interpolation=cv2.INTER_CUBIC))
+    return _SCALED[key]
+
+
+def number_one_hits(img, threshold=NUMBER1_THRESHOLD, scales=None):
     """Every '#1' serial badge on screen, as [(x, y, score)].
     The badge is a black '#1' on a rainbow box whose colors are animated, so the
     black lettering is matched, then the box around it must be rainbow (many hues);
     the gold #2 and bronze #3 badges are one color and are rejected. Card sizes vary,
-    so a range of sizes is tried."""
-    global _BADGE
+    so a range of sizes is tried (`scales` narrows it when the size is already known)."""
+    global _BADGE, LAST_BEST_SCALE
     if _BADGE is None:
         _BADGE = cv2.imread(os.path.join(TEMPLATES, "number1_badge_index.png"))
     dark = _dark(img)
     hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
     best = None
-    for s in np.arange(0.7, 2.6, 0.1):
-        # Resize the color badge smoothly, then take its dark lettering
-        t = _dark(cv2.resize(_BADGE, None, fx=s, fy=s, interpolation=cv2.INTER_CUBIC))
+    for s in (np.arange(0.7, 2.6, 0.1) if scales is None else scales):
+        t = _scaled_badge(s)
         if t.shape[0] > dark.shape[0] or t.shape[1] > dark.shape[1]:
             continue
         res = cv2.matchTemplate(dark, t, cv2.TM_CCOEFF_NORMED)
         if best is None or res.max() > best[0].max():
             best = (res, t.shape)
+            LAST_BEST_SCALE = round(float(s), 2)
     if best is None:
         return []
     res, (th, tw) = best
@@ -294,7 +306,6 @@ class Packs:
     def open_pack(self, pack, should_stop=lambda: False):
         """Open every pack of this kind (or until should_stop). Leaves the menu closed.
         Returns how many times it opened."""
-        g = self.game
         if not self.open_menu():
             return 0
         btn = self.find_open_button(pack)
@@ -459,7 +470,6 @@ def teleport(game, place, settle=1.5, poll=0.5):
         # Click the button's icon, left of the word: the leaderboard (if open) covers
         # the right part of the Teleport menu and would take the click instead
         s = game.ui_scale(img)
-        before = _thumb(img)
         game.click(spot[0] - 80 * s, spot[1])
         game.park_mouse()
         # Done once the Teleport list has closed (two looks in a row, since one OCR

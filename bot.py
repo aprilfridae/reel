@@ -30,13 +30,14 @@ import index_check
 import launcher
 import market
 import market_scan
+import mybids
 import rebirth
 import webstate
 from config import load as load_config
 from events import EventWatcher
 from fisher import DEFAULT_LEAD, Fisher
 from game import HERE, TEMPLATES, Game, StopBot, WindowLost, find_roblox
-from packs import Packs, close_any_menu, close_popup, teleport, teleport_to_fishing
+from packs import Packs, close_any_menu, close_popup, teleport_to_fishing
 
 FULL_CHECK_EVERY = 60  # seconds; backup Packs-menu check during an event
 METEOR_STOP_FISHING = 20  # seconds before a meteor event: don't start new casts
@@ -251,6 +252,10 @@ def main():
             set_request(r["id"], status="done" if ok else "failed",
                         result=f"{msg} ({datetime.now():%H:%M})")
             log(("Done: " if ok else "Failed: ") + msg)
+            if ok:  # the money counter on the website, straight away
+                now = coins.after_spending()
+                if now:
+                    log(f"Balance now {now}")
         req["checked"] = 0
 
     def market_trip():
@@ -270,30 +275,41 @@ def main():
                 os.remove(webstate.path("scan_now.json"))  # it was tried; don't retry in a loop
             except OSError:
                 pass
+            chat.restore_window(game)
             teleport_to_fishing(game)
             return
-        do_requests()
-        # The scan takes a couple of minutes; a bid/buy that comes in meanwhile cuts
-        # it short, gets placed right away (already at the market), then it rescans
-        for _ in range(3):
-            def scan_stop():
-                # a chat message is typed right where the scan is (no menus needed), then it carries on
-                if chat_waiting():
-                    send_chat()
-                return has_request()
-            cards = market_scan.scan(game, log=log, should_stop=scan_stop)
-            if not has_request():
-                break
-            req["checked"] = 0
-            do_requests()
-        webstate.save("market.json", {"cards": cards, "scanned_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                                      "scanned_ts": time.time()})
         try:
-            os.remove(webstate.path("scan_now.json"))
-        except OSError:
-            pass
-        log(f"Market checked: {len(cards)} listing(s) with serial #1-#3")
-        gifts.close_menus(game)
+            do_requests()
+            # The scan takes a couple of minutes; a bid/buy that comes in meanwhile cuts
+            # it short, gets placed right away (already at the market), then it rescans
+            for _ in range(3):
+                # (chat waits for the end of the trip, about a minute: the chat window covers
+                # part of the market while it's open, so it's kept closed during the trip)
+                cards = market_scan.scan(game, log=log, should_stop=has_request)
+                if not has_request():
+                    break
+                req["checked"] = 0
+                do_requests()
+            try:
+                mybids.read_my_bids(game, log=log)  # what's tied up in bids / requests, for the website
+            except StopBot:
+                raise
+            except Exception as e:
+                log(f"(couldn't read my bids: {e})")
+            webstate.save("market.json", {"cards": cards, "scanned_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                                          "scanned_ts": time.time()})
+            try:
+                os.remove(webstate.path("scan_now.json"))
+            except OSError:
+                pass
+            log(f"Market checked: {len(cards)} listing(s) with serial #1-#3")
+            gifts.close_menus(game)
+        finally:
+            # whatever happened (a stop, the window closing), chat must not stay switched off
+            try:
+                chat.restore_window(game)
+            except Exception:
+                pass
         teleport_to_fishing(game)
 
     idx = {"wanted": False}

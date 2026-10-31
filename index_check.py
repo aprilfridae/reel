@@ -10,6 +10,7 @@ Tabs: Rarities (Common ... Iced), Event (Molten ... Atlantis, and any new ones),
 Alt Covers, Supporter. Sub-tab names are read off the screen, so new event rarities
 are picked up by themselves.
 """
+import json
 import os
 import re
 import time
@@ -61,17 +62,22 @@ def is_excluded(name):
     return best in EXCLUDED and score >= 0.6
 
 
+EARLY_STOP = True  # stop paging a tab at the first page with no new #1 (they come first, sorted by serial)
 FRAMES_PER_PAGE = 3  # looks at each scroll position: sparkles can hide a badge in one frame
+FRAME_GAP = 0.12  # seconds between those looks
 
 
 def _detect_page(game, s, rows):
     """The #1 cards on screen now, from a few frames a moment apart (a badge can be
     missed in a single frame). Returns (first frame, [[crop, (x, y), score], ...])."""
     first, found = None, []
+    ones.CUT_SEEN = 0
     for k in range(FRAMES_PER_PAGE):
         img = game.frame()
         first = img if first is None else first
-        for crop, (x, y), score in ones.card_crops(img, s, rows):
+        crops = ones.card_crops(img, s, rows)
+        ones.CUT_SEEN = max(ones.CUT_SEEN, ones.LAST_CUT)
+        for crop, (x, y), score in crops:
             for f in found:
                 if abs(f[1][0] - x) <= 15 and abs(f[1][1] - y) <= 15:
                     if score > f[2]:  # the same card: keep its best-looking frame
@@ -80,7 +86,7 @@ def _detect_page(game, s, rows):
             else:
                 found.append([crop, (x, y), score])
         if k + 1 < FRAMES_PER_PAGE:
-            game.wait(0.25)
+            game.wait(FRAME_GAP)
     return first, found
 
 
@@ -106,16 +112,38 @@ def _scrolled(prev_img, img, box):
     return top - loc[1] if score >= 0.5 else None
 
 
+def _settle(game, box, maxwait=1.2, first=0.15):
+    """Wait only as long as the card grid is still changing (a tab switching, the list
+    scrolling), instead of a fixed pause: returns as soon as two looks 0.12s apart agree."""
+    game.wait(first)
+    prev = game.frame()
+    end = time.time() + maxwait
+    while time.time() < end:
+        game.wait(0.12)
+        cur = game.frame()
+        if _same_view(prev, cur, box):
+            return cur
+        prev = cur
+    return prev
+
+
 def _collect_ones(game, rarity, s, box, found_at, log=print):
     """Page through the open tab (sorted by serial) and add its #1 cards to the website's
     collection. Each card is counted once however many pages it shows on, by its place
     in the scrolling grid (the scroll distance is measured). Returns how many #1 cards
-    the tab has."""
+    the tab has.
+
+    The tab is sorted by lowest serial, so its #1 cards are all at the start: as soon as a
+    page shows no new #1 card, there are no more, and the rest isn't looked at."""
     x0, y0, x1, y1 = box
     mid = ((x0 + x1) / 2, (y0 + y1) / 2)
     distinct, prev, scrolled = [], None, 0  # distinct: [crop, x, y in the whole list]
     for page in range(MAX_PAGES):
         first, cards = _detect_page(game, s, (y0, y1))
+        if page == 0 and not cards:  # nothing on the first look: make sure it wasn't still loading
+            _settle(game, box, 0.8, 0.3)
+            first, cards = _detect_page(game, s, (y0, y1))
+        before = len(distinct)
         if prev is not None:
             if _same_view(prev, first, box):
                 break  # it didn't move: that was the last page
@@ -131,11 +159,16 @@ def _collect_ones(game, rarity, s, box, found_at, log=print):
         for crop, (x, y), _ in cards:
             if not any(abs(d[1] - x) <= 18 and abs(d[2] - (y + scrolled)) <= 18 for d in distinct):
                 distinct.append([crop, x, y + scrolled])
+        # (a #1 whose card is cut off at the bottom of the grid isn't counted yet, but it
+        # means there's more to see further down)
+        if EARLY_STOP and len(distinct) == before and not getattr(ones, "CUT_SEEN", 0):
+            break  # no new #1 on this page: sorted by serial, so there are none further down
         prev = first
-        if not game.scroll(*mid, -2):
+        if not game.scroll(*mid, -2, check=False):  # (the Index was checked to be open at the start)
             break
-        game.wait(0.8)
-    game.scroll(*mid, 15)  # back to the top
+        _settle(game, box, 0.9, 0.15)
+    if prev is not None:  # only scroll back if it was scrolled at all
+        game.scroll(*mid, 15, check=False)  # back to the top
     ones.add_cards(rarity, [d[0] for d in distinct], found_at, log=log)
     return len(distinct)
 
@@ -222,11 +255,22 @@ def snapshot(game, log=print, should_stop=lambda: False):
         log("Index check: couldn't find the Packs/Index buttons.")
         return {}, False
     g.click(packs[0], packs[1] + INDEX_BELOW_PACKS * s)
-    g.wait(1.5)
+    g.wait(1.2)
+    if not g.menu_open():
+        g.wait(1.0)
+        if not g.menu_open():
+            log("Index check: the Index didn't open.")
+            return {}, False
 
     os.makedirs(RECORDS_DIR, exist_ok=True)
     stamp = datetime.now().strftime("%Y-%m-%d %H-%M")
     counts, skipped = {}, []
+    last_file = os.path.join(RECORDS_DIR, "last_counts.json")
+    try:
+        with open(last_file) as f:
+            last = json.load(f)
+    except (OSError, ValueError):
+        last = {}
     x0, x1 = (int(at((GRID_X[0], 0))[0]), int(at((GRID_X[1], 0))[0]))
     try:
         _ensure_serial_sort(g, at)
@@ -236,7 +280,7 @@ def snapshot(game, log=print, should_stop=lambda: False):
                 break
             g.click(*at((xoff, TAB_Y)))
             g.park_mouse()
-            g.wait(1.0)
+            _settle(g, (x0, int(at((0, GRID_TOP[True]))[1]), x1, int(at((0, GRID_BOTTOM))[1])), 1.2, 0.25)
             if main in HAS_SUBTABS:
                 tabs = _subtabs(g, at, main)
                 known = KNOWN_SUBTABS[main]
@@ -254,15 +298,21 @@ def snapshot(game, log=print, should_stop=lambda: False):
                 if should_stop():
                     finished = False
                     break
+                top = int(at((0, GRID_TOP[main in HAS_SUBTABS]))[1])
+                box = (x0, top, x1, int(at((0, GRID_BOTTOM))[1]))
                 if x is not None:
                     g.click(x, at((0, SUBTAB_Y))[1])
                     g.park_mouse()
-                    g.wait(1.0)
-                top = int(at((0, GRID_TOP[main in HAS_SUBTABS]))[1])
-                box = (x0, top, x1, int(at((0, GRID_BOTTOM))[1]))
+                    _settle(g, box, 1.2, 0.25)
                 if name == todo[0][0] and main == "event":  # one full screenshot for the record
                     cv2.imwrite(os.path.join(RECORDS_DIR, f"{stamp} {main}.png"), g.frame())
-                counts[name] = _collect_ones(g, name, s, box, datetime.now().strftime("%Y-%m-%d %H:%M"), log)
+                when = datetime.now().strftime("%Y-%m-%d %H:%M")
+                counts[name] = _collect_ones(g, name, s, box, when, log)
+                if counts[name] < last.get(name, 0):
+                    # fewer than last time: a badge may have been hidden by a sparkle in every
+                    # frame, so look at this tab once more (a card really gone shows up the
+                    # same way again, and then the lower number is remembered)
+                    counts[name] = max(counts[name], _collect_ones(g, name, s, box, when, log))
     finally:
         try:
             g.click(*at(CLOSE))
@@ -271,6 +321,9 @@ def snapshot(game, log=print, should_stop=lambda: False):
         except StopBot:
             raise
 
+    if finished:  # (a sweep cut short has no numbers for the tabs it never reached)
+        with open(last_file, "w") as f:
+            json.dump(counts, f)
     total = sum(counts.values())
     with open(os.path.join(RECORDS_DIR, "sweeps.csv"), "a", encoding="utf-8") as f:
         if f.tell() == 0:
