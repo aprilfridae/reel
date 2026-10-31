@@ -75,13 +75,30 @@ def active_bids(market, requests, now):
                        "seller": r.get("card", {}).get("seller")} for r in found]}
 
 
+LOGO_FILES = ("logo.svg", "logo.gif", "logo.webp", "logo.png")
+
+
+def _logo_dirs():
+    # next to the program first (drop your own logo there), then the one bundled in the .exe
+    return (os.path.join(APP, "web", "static"), os.path.join(RES, "web", "static"))
+
+
 @app.get("/api/logo")
 def logo():
-    """The header logo: web/static/logo.svg / .gif / .webp / .png, whichever is there first."""
-    for name in ("logo.svg", "logo.gif", "logo.webp", "logo.png"):
-        if os.path.exists(os.path.join(APP, "web", "static", name)):
+    """The header logo: logo.svg / .gif / .webp / .png in web/static, whichever is there first."""
+    for name in LOGO_FILES:
+        if any(os.path.exists(os.path.join(d, name)) for d in _logo_dirs()):
             return jsonify(file=name)
     return jsonify(file=None)
+
+
+@app.get("/brand/<name>")
+def brand(name):
+    if name in LOGO_FILES:
+        for d in _logo_dirs():
+            if os.path.exists(os.path.join(d, name)):
+                return send_from_directory(d, name)
+    return "", 404
 
 
 @app.get("/api/state")

@@ -29,7 +29,7 @@
   header { display: flex; flex-wrap: wrap; gap: var(--u); align-items: center; justify-content: space-between;
            padding: var(--u); position: sticky; top: 0; z-index: 5; background: var(--bg); border-bottom: var(--line); }
   .brand { display: flex; align-items: center; gap: var(--u); }
-  .logo { width: 4var(--u); height: 4var(--u); object-fit: contain; display: block; flex: none; }
+  .logo { width: 64px; height: 64px; object-fit: contain; display: block; flex: none; }
   .logo.spin { animation: spin 6s linear infinite; }
   .ring { border: 2px solid #fff; border-top-color: transparent; border-radius: 50%; }
   @keyframes spin { to { transform: rotate(360deg); } }
@@ -85,7 +85,7 @@
   .bidbox.has { border-style: solid; font-weight: 700; }
   .switch { display: flex; align-items: center; gap: var(--u); cursor: pointer; user-select: none; }
   .switch input { position: absolute; opacity: 0; width: 0; height: 0; }
-  .switch .track { width: 4var(--u); height: 24px; border: var(--line); position: relative; flex: none; }
+  .switch .track { width: 48px; height: 24px; border: var(--line); position: relative; flex: none; }
   .switch .thumb { position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; background: #fff; }
   .switch input:checked + .track { background: #fff; }
   .switch input:checked + .track .thumb { transform: translateX(24px); background: #000; }
@@ -133,7 +133,7 @@
   .empty { padding: var(--u) 0; text-align: center; opacity: .6; }
 
   .who-row { display: flex; align-items: center; gap: var(--u); padding: var(--u) var(--u); margin-bottom: var(--u); border: var(--line); }
-  .who-row .no { min-width: 4var(--u); text-align: center; font-weight: 700; border: var(--line); padding: 0 var(--u); }
+  .who-row .no { min-width: 48px; text-align: center; font-weight: 700; border: var(--line); padding: 0 var(--u); }
   .who-row .no.n1 { background: #fff; color: #000; }
   .who-row .nm { flex: 1; font-weight: 700; word-break: break-word; }
   .who-row .on { font-size: 12px; }
@@ -255,7 +255,7 @@ window.alert = (m) => _alert(String(m).toLowerCase());
     const f = (await (await fetch("/api/logo")).json()).file;
     if (!f) return;  // none: the white spinning ring stays
     const img = $("logo");
-    img.src = "/static/" + f; img.hidden = false; $("logo-fallback").hidden = true;
+    img.src = "/brand/" + f; img.hidden = false; $("logo-fallback").hidden = true;
     img.classList.toggle("spin", !f.endsWith(".gif"));
   } catch {}
 })();
