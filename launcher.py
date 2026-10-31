@@ -9,7 +9,8 @@ The player has to be signed in already; this never touches a password.
 import os
 import time
 
-from game import find_roblox
+from game import WindowLost, find_roblox
+from ocr import read_words
 
 
 def join_url(cfg):
@@ -74,9 +75,64 @@ def ensure_running(cfg, log=print):
     return start_roblox(cfg, log) and wait_for_window(log=log)
 
 
+def _dialog_words(game, img=None):
+    img = game.frame() if img is None else img
+    h, w = img.shape[:2]
+    x0, y0 = int(w * 0.35), int(h * 0.33)
+    return [(t, x0 + x, y0 + y) for t, x, y in read_words(img[y0:int(h * 0.68), x0:int(w * 0.65)], scale=2)]
+
+
+def is_disconnected(game, img=None):
+    """Is Roblox's "Disconnected ... (Error Code: 277)" box up? (It appears when the internet
+    drops; the window stays open, so it isn't noticed as a lost window.) Returns the
+    (Reconnect, Leave) button positions as a dict, or None."""
+    words = _dialog_words(game, img)
+    names = {t.lower().strip(".:!") for t, _, _ in words}
+    if "disconnected" not in names:
+        return None
+    pos = {t.lower().strip(".:!"): (x, y) for t, x, y in words}
+    return {"reconnect": pos.get("reconnect"), "leave": pos.get("leave")}
+
+
+def reconnect(game, cfg, log=print):
+    """Get out of the Disconnected box: press Reconnect (again every so often while the
+    internet is still down), and after a few tries leave and rejoin through the join link.
+    True once the game is showing again."""
+    log("Disconnected from the game; reconnecting...")
+    end = time.time() + 900
+    tries = 0
+    while time.time() < end:
+        box = is_disconnected(game)
+        if not box:
+            return wait_in_game(game, timeout=120, log=log)
+        if tries >= 3 and cfg.get("auto_launch") and box.get("leave"):
+            log("Reconnect isn't working; leaving and rejoining.")
+            game.click(*box["leave"])
+            game.park_mouse()
+            game.wait(5)
+            return False  # the window goes away: recover() starts it again
+        if box.get("reconnect"):
+            game.click(*box["reconnect"])
+            game.park_mouse()
+            tries += 1
+        for _ in range(25):  # up to ~50s for it to come back
+            game.wait(2)
+            if not is_disconnected(game):
+                break
+        else:
+            game.wait(10)  # still down (internet off?): wait a bit before pressing it again
+    return False
+
+
 def recover(game, cfg, log=print):
-    """The Roblox window went away: start it again, join, and attach to the new window.
-    True when the bot can carry on."""
+    """The Roblox window went away, or it's showing "Disconnected": get back into the game
+    (reconnect / start it again, join, attach to the new window). True when the bot can
+    carry on."""
+    try:
+        if is_disconnected(game) and reconnect(game, cfg, log):
+            return True
+    except WindowLost:
+        pass  # it closed meanwhile: start it again below
     if not cfg.get("auto_launch"):
         return False
     log("Lost the Roblox window.")

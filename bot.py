@@ -118,6 +118,7 @@ def main():
         ms["checked"] = 0.0
 
     cw = {"checked": 0.0, "value": False}
+    dc = {"checked": 0.0}  # when "Disconnected" was last looked for
 
     def chat_waiting():
         """A message typed on the website, waiting to be sent in game (looked at most
@@ -343,6 +344,10 @@ def main():
         if reeling:
             events.update_label(img, defer=True)
             return False
+        if time.time() - dc["checked"] > 20:  # the internet dropped? (Roblox's "Disconnected" box)
+            dc["checked"] = time.time()
+            if launcher.is_disconnected(game, img):
+                raise WindowLost()  # handled in the main loop: reconnect, then carry on
         if talk.due():
             talk.read(img)
         if coins.due():
@@ -428,6 +433,10 @@ def main():
                     and datetime.now().hour < PACK_SESSION_LATEST)
 
     def one_round():
+        if time.time() - dc["checked"] > 20:
+            dc["checked"] = time.time()
+            if launcher.is_disconnected(game):
+                raise WindowLost()
         if chat_waiting():
             send_chat()
             return
