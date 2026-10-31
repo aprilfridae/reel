@@ -133,36 +133,45 @@ def find_rarity_cards(img, threshold=RARITY_THRESHOLD):
 def read_catch_popup(game, timeout=2.5):
     """Wait for the "You caught ..." popup. Returns (got_atlantis, popup_image).
     An Atlantis catch's title reads "You caught an Atlantis Pack!".
-    The popup animates in, so it's watched for about a second (picture match on
-    each frame) and its text is also read with OCR, before deciding it's not Atlantis."""
+    The popup animates in; each frame is checked by picture match on its title, and its
+    text is also read with OCR once it has settled, before deciding it's not Atlantis
+    (looked at every 20 ms rather than every 100 ms, and decided a little over half a
+    second after it appears)."""
     end = time.time() + timeout
     while time.time() < end:
         img = game.frame()
         log = game.find("popup_log", img)
         if log:
             break
-        game.wait(0.1)
+        time.sleep(0.02)
     else:
         return False, None
     s = game.ui_scale(img)
     x, y = log[0], log[1]
     title = (x - 60 * s, y + 50 * s, x + 450 * s, y + 140 * s)
     whole = (x - 80 * s, y - 30 * s, x + 420 * s, y + 230 * s)  # the whole popup
+    seen = time.time()
     read = False
-    watch_until = time.time() + 1.2
-    while time.time() < watch_until:
+    while True:
         if game.find("popup_atlantis", img, region=title) is not None:
             return True, img
-        if not read and time.time() > watch_until - 0.8:  # once it's settled
+        waited = time.time() - seen
+        if not read and waited > POPUP_OCR_AFTER:  # once it's settled
             x0, y0, x1, y1 = (max(0, int(v)) for v in whole)
             if "atlantis" in read_text(img[y0:y1, x0:x1], scale=2).lower():
                 return True, img
             read = True
-        game.wait(0.1)
+        if waited > POPUP_DECIDE_AFTER:
+            return False, img
+        time.sleep(0.02)
         img = game.frame()
         if not game.find("popup_log", img):
             break  # popup went away on its own
     return False, img
+
+
+POPUP_OCR_AFTER = 0.22  # seconds after the popup shows: read its text
+POPUP_DECIDE_AFTER = 0.45  # ...and if nothing says Atlantis by now, it isn't
 
 
 CLOSE_BUTTONS = ("close_daily", "close_gifts", "close_market", "close_menu")  # the menus' red X's differ
@@ -199,6 +208,16 @@ def close_any_menu(game):
     return False
 
 
+def dismiss_popup(game):
+    """Click the catch popup's X and carry straight on, without waiting for it to go: it
+    fades out by itself in a moment, and casting works while it does. (close_popup is the
+    careful version, for before menus are used.)"""
+    x = game.find("popup_close", game.frame())
+    if x:
+        game.click(x[0], x[1])
+        game.park_mouse()
+
+
 def close_popup(game):
     """Close the catch popup if it's up (it gets in the way of menus)."""
     for _ in range(4):
@@ -209,7 +228,11 @@ def close_popup(game):
         if x:
             game.click(x[0], x[1])
             game.park_mouse()
-        game.wait(0.4)
+        end = time.time() + 0.5
+        while time.time() < end:  # until it's gone (not a fixed pause)
+            time.sleep(0.04)
+            if not game.find("popup_log", game.frame()):
+                return
 
 
 class Packs:

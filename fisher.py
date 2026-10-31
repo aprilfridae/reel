@@ -10,13 +10,16 @@ import time
 import cv2
 
 from game import HERE, Game, StopBot
-from packs import close_popup, read_catch_popup
+from packs import close_popup, dismiss_popup, read_catch_popup
 from vision import detect
 
 # Bar physics fitted from live reels on a test PC at 50 fps (px/s^2 at UI scale 1)
 A_HOLD = 1015
 A_RELEASE = 737
 DEFAULT_LEAD = 0.4  # best in replays of real reels (analysis/sim_reels.py)
+CAST_DELAY = 0.3  # seconds the fishing panel must be gone before the first cast press
+RECAST_EVERY = 0.4  # then E is pressed this often until a cast starts (the panel takes ~0.3s to show)
+STUCK_AFTER = 15  # seconds of pressing E with no fishing panel before it counts as stuck
 
 
 def plan_hold(fish, fish_v, c, v, width, physics, horizon=0.6, dt=0.025, last=None):
@@ -131,7 +134,7 @@ class Fisher:
         state = "idle"
         idle_since = time.time()
         last_cast = 0.0
-        failed_casts = 0
+        last_stuck = 0.0
         saved_stuck = False
         last_zone = 0.0
         pending = False
@@ -155,7 +158,6 @@ class Fisher:
                     last_zone = now
                     if state != "reel":
                         state = "reel"
-                        failed_casts = 0
                         saved_stuck = False
                         self.reeler.reset()
                     hold = self.reeler.step(d, now)
@@ -194,9 +196,12 @@ class Fisher:
                                        f"{int(self.last_popup is not None)}\n")
                     self.reel_id += 1
                     print(f"Reel finished ({self.catches} so far)" + (", got an Atlantis pack!" if won_pack else ""))
-                    close_popup(game)
-                    if won_pack and on_catch:
-                        on_catch()
+                    if won_pack:
+                        close_popup(game)  # (the packs menu is opened next: the popup must be gone)
+                        if on_catch:
+                            on_catch()
+                    else:
+                        dismiss_popup(game)  # click its X and carry on: no waiting for it to fade
                     state = "idle"
                     idle_since = time.time()
                     continue
@@ -204,20 +209,19 @@ class Fisher:
                 if should_stop():
                     return
                 if d["busy"]:
-                    if state != "wait":
-                        failed_casts = 0
                     state = "wait"
                 else:
                     if state != "idle":
                         idle_since = now
                     state = "idle"
-                    # Tap E to cast once the panel is gone; keep trying until a cast starts
-                    if now - idle_since > 0.3 and now - last_cast > 1.5:
-                        if last_cast and now - last_cast < 3.0:
-                            failed_casts += 1
-                        if failed_casts >= 6:
+                    # The game ignores E for a while after a catch (1.4 to 2.5 seconds, it varies),
+                    # then accepts it. So E is pressed every RECAST_EVERY seconds from the moment
+                    # the fishing panel is gone: the first press the game accepts casts, with no
+                    # timer guess in between (a fixed wait either wastes time or comes too early)
+                    if now - idle_since > CAST_DELAY and now - last_cast > RECAST_EVERY:
+                        if now - idle_since > STUCK_AFTER and now - last_stuck > STUCK_AFTER:
                             print("Casting isn't working.")
-                            failed_casts = 0
+                            last_stuck = now
                             if on_stuck:
                                 on_stuck()
                         game.tap("e")
