@@ -1,0 +1,20 @@
+__pycache__/
+*.pyc
+config.json
+stop.flag
+dist/
+build_tmp/
+*.log
+*.exe
+*.zip
+# everything the bot writes while running
+web/data/
+web/static/
+rebirth_state.json
+pack_session_done.txt
+daily_spin_done.txt
+reveals/
+number1s/
+serial_glyphs/
+*.png
+!templates/*.png

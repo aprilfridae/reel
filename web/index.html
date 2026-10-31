@@ -1,0 +1,332 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fishing Bot Market</title>
+<style>
+  :root {
+    --bg: #f6f5f8; --panel: #ffffff; --ink: #1d1b22; --muted: #6b6775; --line: #e3e0ea;
+    --accent: #6a3df0; --accent-ink: #ffffff; --good: #138a4f; --bad: #c2362b; --warn: #a86a00;
+    --rainbow: linear-gradient(90deg,#ff4d4d,#ffb54d,#f7f04d,#4dd97a,#4db8ff,#a64dff);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #141219; --panel: #1d1a24; --ink: #ece9f3; --muted: #9a95a6; --line: #2e2a38;
+      --accent: #9b7bff; --accent-ink: #120f19; --good: #4bd58e; --bad: #ff7a6e; --warn: #f2b84b;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 15px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between;
+           padding: 14px 16px; border-bottom: 1px solid var(--line); background: var(--panel);
+           position: sticky; top: 0; z-index: 2; }
+  h1 { font-size: 18px; margin: 0; }
+  .status { color: var(--muted); font-size: 13px; }
+  .balance { border: 1px solid var(--line); border-radius: 10px; padding: 6px 12px; background: var(--bg); }
+  .balance b { font-size: 18px; color: #e0a800; }
+  .balance .muted { font-size: 12px; }
+  main { display: grid; grid-template-columns: 1fr 360px; gap: 16px; padding: 16px; max-width: 1400px; margin: 0 auto; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; min-width: 0; }
+  h2 { font-size: 15px; margin: 0 0 10px; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .muted { color: var(--muted); font-size: 13px; font-weight: normal; }
+  button { font: inherit; border: 0; border-radius: 8px; padding: 7px 12px; cursor: pointer;
+           background: var(--accent); color: var(--accent-ink); font-weight: 600; }
+  button.ghost { background: transparent; color: var(--accent); border: 1px solid var(--line); }
+  button:disabled { opacity: .5; cursor: default; }
+  input { font: inherit; padding: 7px 9px; border-radius: 8px; border: 1px solid var(--line);
+          background: var(--bg); color: var(--ink); min-width: 0; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; }
+  .card { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; display: flex; flex-direction: column; }
+  .card img { width: 100%; height: auto; display: block; background: #000; }
+  .card .body { padding: 9px; display: grid; gap: 3px; font-size: 13px; }
+  .card .name { font-weight: 700; font-size: 14px; display: flex; gap: 6px; align-items: center; }
+  .serial { font-size: 12px; font-weight: 800; padding: 1px 7px; border-radius: 6px; color: #111; background: #f2c14b; }
+  .serial.one { background: var(--rainbow); }
+  .row { display: flex; justify-content: space-between; gap: 8px; }
+  .k { color: var(--muted); }
+  .actions { display: flex; gap: 6px; padding: 0 9px 9px; flex-wrap: wrap; }
+  .actions input { flex: 1; width: 80px; }
+  .req { border-bottom: 1px solid var(--line); padding: 7px 0; font-size: 13px; display: flex; gap: 8px; align-items: center; justify-content: space-between; }
+  .req:last-child { border-bottom: 0; }
+  .pill { font-size: 12px; padding: 1px 7px; border-radius: 99px; border: 1px solid var(--line); white-space: nowrap; }
+  .pill.done { color: var(--good); } .pill.failed { color: var(--bad); } .pill.waiting, .pill.working { color: var(--warn); }
+  .chat { height: 420px; overflow-y: auto; font-size: 13px; display: flex; flex-direction: column; gap: 3px;
+          border: 1px solid var(--line); border-radius: 8px; padding: 8px; background: var(--bg); }
+  .modes { display: flex; gap: 6px; flex-wrap: wrap; }
+  .modes button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .chat .who { font-weight: 700; }
+  .chat .mine { color: var(--accent); }
+  form.send { display: flex; gap: 6px; margin-top: 8px; }
+  form.send input { flex: 1; }
+  .empty { color: var(--muted); padding: 20px 0; text-align: center; }
+  .wide { max-width: 1400px; margin: 0 auto; padding: 0 16px 24px; }
+  .ones { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px; }
+  .one { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--bg); }
+  .one img { width: 100%; height: auto; display: block; }
+  .one .meta { display: flex; justify-content: space-between; align-items: center; gap: 6px;
+               padding: 6px 9px; font-size: 12px; color: var(--muted); }
+  .chip { font-size: 11px; font-weight: 700; padding: 1px 8px; border-radius: 99px; color: #fff; }
+  .chip.blood { background: #b3202a; } .chip.eclipse { background: #c9822b; }
+  .chip.other { background: var(--accent); color: var(--accent-ink); }
+  aside { display: grid; gap: 16px; align-content: start; }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Underground RNG — market &amp; chat</h1>
+    <div class="status" id="status">connecting…</div>
+  </div>
+  <div style="display:flex;gap:12px;align-items:center">
+    <div class="balance" title="Coins you have right now (coins held in your active bids aren't included)">
+      <span class="muted">Balance</span> <b id="balance">…</b> <span class="muted" id="balance-at"></span>
+    </div>
+    <button class="ghost" id="scan">Check market now</button>
+  </div>
+</header>
+<main>
+  <section>
+    <h2>Serial #1–#3 listings <span class="muted" id="scanned"></span></h2>
+    <div class="cards" id="cards"></div>
+  </section>
+  <aside>
+    <section>
+      <h2>What it's doing</h2>
+      <div class="modes" id="modes">
+        <button class="ghost" data-mode="auto" title="Follow the schedule: fish, event packs, nightly packs and rebirth, hourly market check">Auto (schedule)</button>
+        <button class="ghost" data-mode="fish" title="Only fish. No pack sessions, rebirths, Index or hourly market checks">Fish only</button>
+        <button class="ghost" data-mode="pause" title="Do nothing (chat, bids and rebirths from here still go through)">Paused</button>
+      </div>
+      <div class="muted" id="mode-note" style="margin:6px 0"></div>
+      <div class="modes">
+        <button class="ghost" data-do="packs">Open packs now</button>
+        <button class="ghost" data-do="index">Record #1s now</button>
+      </div>
+    </section>
+    <section>
+      <h2>Rebirth <span class="muted" id="rb-at"></span></h2>
+      <div style="display:flex;gap:16px;align-items:baseline;flex-wrap:wrap">
+        <div><span class="muted">Rebirths</span> <b id="rb-count" style="font-size:22px">?</b></div>
+        <div><span class="muted">Next costs</span> <b id="rb-cost">?</b></div>
+        <div><span class="muted">Luck</span> <b id="rb-luck">?</b></div>
+      </div>
+      <form class="send" id="rb-form" style="margin-top:10px">
+        <input id="rb-n" type="number" min="1" max="50" value="1" style="width:70px" title="How many times">
+        <button id="rb-go">Rebirth</button>
+      </form>
+    </section>
+    <section>
+      <h2>Your bids &amp; buys</h2>
+      <div id="requests"></div>
+    </section>
+    <section>
+      <h2>Game chat <span class="muted">read off the screen</span></h2>
+      <div class="chat" id="chat"></div>
+      <form class="send" id="send">
+        <input id="msg" maxlength="200" placeholder="Say something in game…" autocomplete="off">
+        <button>Send</button>
+      </form>
+      <div class="status" id="outbox"></div>
+    </section>
+  </aside>
+</main>
+<div class="wide">
+  <section>
+    <h2>My #1s found, all time <span class="muted" id="ones-count"></span></h2>
+    <div class="ones" id="ones"></div>
+  </section>
+</div>
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+let lastChatLen = 0;
+
+// Only touch a section when its content actually changed (rewriting identical HTML
+// reloads every picture, which flashes, and the page can jump while it's rebuilt), and
+// keep the scroll position when it does change.
+function setHtml(el, html) {
+  if (el._html === html) return false;
+  el._html = html;
+  const y = window.scrollY;
+  el.innerHTML = html;
+  window.scrollTo(0, y);
+  return true;
+}
+
+async function post(url, body) {
+  const r = await fetch(url, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body || {})});
+  const j = await r.json();
+  if (!r.ok) alert(j.error || "Something went wrong");
+  return j;
+}
+
+function cardHtml(c, i) {
+  const one = c.serial === "1";
+  const price = c.top_bid || c.current_bid || c.start || "?";
+  return `<div class="card">
+    ${c.image ? `<img src="/static/cards/${esc(c.image)}?t=${esc(c.seen_at)}" alt="">` : ""}
+    <div class="body">
+      <div class="name"><span class="serial ${one ? "one" : ""}">#${esc(c.serial)}</span></div>
+      <div class="row"><span class="k">${c.top_bidder ? "Top bid" : (c.start ? "Starts at" : "Price")}</span><b>${esc(price)}</b></div>
+      ${c.buy_now ? `<div class="row"><span class="k">Buy now</span><b>${esc(c.buy_now)}</b></div>` : ""}
+      <div class="row"><span class="k">Top bidder</span><span>${esc(c.top_bidder || "none yet")}</span></div>
+      <div class="row"><span class="k">Seller</span><span>${esc(c.seller || "?")}</span></div>
+      <div class="row"><span class="k">Ends in</span>${c.ends_ts
+        ? `<b class="countdown" data-ends="${c.ends_ts}">${esc(c.time_left)}</b>`
+        : `<span>${esc(c.time_left || "?")}</span>`}</div>
+    </div>
+    <div class="actions">
+      <input id="amt${i}" placeholder="e.g. 650B">
+      <button data-bid="${i}">Bid</button>
+      ${c.buy_now ? `<button class="ghost" data-buy="${i}">Buy now</button>` : ""}
+    </div>
+  </div>`;
+}
+
+function renderOnes(list) {
+  const byRarity = {};
+  list.forEach(o => byRarity[o.rarity] = (byRarity[o.rarity] || 0) + 1);
+  const label = (r) => r.charAt(0).toUpperCase() + r.slice(1).replace("_", " ");
+  $("ones-count").textContent = list.length
+    ? `${list.length} total · ` + Object.entries(byRarity).map(([r, n]) => `${n} ${label(r)}`).join(" · ")
+    : "";
+  const sorted = list.slice().sort((a, b) => (b.found_at || "").localeCompare(a.found_at || ""));
+  setHtml($("ones"), sorted.length ? sorted.map(o => `
+    <div class="one"><img src="/static/ones/${esc(o.image)}" alt="">
+      <div class="meta"><span class="chip ${["blood", "eclipse"].includes(o.rarity) ? esc(o.rarity) : "other"}">${esc(label(o.rarity))}</span>
+      <span>found ${esc((o.found_at || "").slice(0, 10))}</span></div></div>`).join("")
+    : `<div class="empty">No #1s recorded yet. They're added after each Blood Moon / Eclipse event.</div>`);
+}
+
+let cards = [];
+let clockOffset = 0;  // bot PC's clock minus this device's clock, in seconds
+
+function fmtLeft(secs) {
+  if (secs <= 0) return "ended";
+  const h = Math.floor(secs / 3600), m = Math.floor(secs % 3600 / 60), s = Math.floor(secs % 60);
+  return (h ? `${h}h ` : "") + (h || m ? `${String(m).padStart(h ? 2 : 1, "0")}m ` : "") + `${String(s).padStart(2, "0")}s`;
+}
+function tick() {
+  const now = Date.now() / 1000 + clockOffset;
+  document.querySelectorAll("[data-ends]").forEach(el => {
+    const left = +el.dataset.ends - now;
+    if (left <= 0) {  // the auction ended: take the card off the page
+      const card = el.closest(".card");
+      if (card) card.remove();
+      return;
+    }
+    el.textContent = fmtLeft(left);
+    el.style.color = left < 300 ? "var(--bad)" : "";
+  });
+  if ($("cards") && cards.length && !$("cards").querySelector(".card")) {
+    $("cards").innerHTML = `<div class="empty">Those listings have ended. The next market check will bring in new ones.</div>`;
+  }
+}
+setInterval(tick, 1000);
+
+async function refresh() {
+  let s;
+  try { s = await (await fetch("/api/state")).json(); } catch { $("status").textContent = "can't reach the bot's PC"; return; }
+  if (s.now) clockOffset = s.now - Date.now() / 1000;
+  $("balance").textContent = s.balance.value || "?";
+  $("balance-at").textContent = s.balance.at ? `as of ${s.balance.at}` : "";
+  const mode = (s.mode && s.mode.mode) || "auto", queued = (s.mode && s.mode.once) || [];
+  document.querySelectorAll("[data-mode]").forEach(b => b.classList.toggle("on", b.dataset.mode === mode));
+  $("mode-note").textContent = ({auto: "Following the schedule.", fish: "Only fishing (bids, buys, chat and rebirths still work).",
+    pause: "Paused."})[mode] + (queued.length ? ` Queued: ${queued.join(", ")}.` : "");
+  const rb = s.rebirth || {};
+  $("rb-count").textContent = rb.rebirths ?? "?";
+  $("rb-cost").textContent = rb.cost || "?";
+  $("rb-luck").textContent = rb.luck_now ? `x${rb.luck_now} -> x${rb.luck_after ?? "?"}` : "?";
+  $("rb-at").textContent = rb.at ? `read ${rb.at}` : "not read yet";
+  $("status").textContent = s.status.text ? `Bot: ${s.status.text} (${s.status.at})` : "Bot status unknown";
+  const nowSecs = Date.now() / 1000 + clockOffset;
+  cards = (s.market.cards || []).filter(c => !c.ends_ts || c.ends_ts > nowSecs);  // drop ended auctions
+  $("scanned").textContent = s.market.scanned_at ? `checked ${s.market.scanned_at}` : "not checked yet";
+  const focused = document.activeElement && document.activeElement.id.startsWith("amt") ? document.activeElement.id : null;
+  const typed = {}; document.querySelectorAll("[id^=amt]").forEach(e => typed[e.id] = e.value);
+  if (setHtml($("cards"), cards.length ? cards.map(cardHtml).join("") : `<div class="empty">No #1–#3 listings found yet.</div>`)) {
+    Object.entries(typed).forEach(([id, v]) => { if ($(id)) $(id).value = v; });
+    if (focused && $(focused)) $(focused).focus({preventScroll: true});
+  }
+  tick();
+
+  setHtml($("requests"), s.requests.length ? s.requests.slice().reverse().map(r => `
+    <div class="req">${r.card.image ? `<img src="/static/cards/${esc(r.card.image)}" alt="" style="width:40px;border-radius:4px">` : ""}
+      <div style="flex:1">${r.kind === "rebirth" ? `<b>Rebirth x${esc(r.amount)}</b>` : `<b>${r.kind === "buy" ? "Buy now" : "Bid " + esc(r.amount)}</b> on #${esc(r.card.serial)} from ${esc(r.card.seller || "?")}`}
+      <div class="muted">${esc(r.result || r.asked_at)}</div></div>
+      <div><span class="pill ${esc(r.status)}">${esc(r.status)}</span>
+      ${r.status === "waiting" ? `<button class="ghost" data-cancel="${esc(r.id)}">Cancel</button>` : ""}</div></div>`).join("")
+    : `<div class="empty">Nothing yet.</div>`);
+
+  renderChat(s.chat, s.outbox);
+  renderOnes(s.ones || []);
+}
+
+let chatSig = "";
+function renderChat(chat, outbox) {
+  $("outbox").textContent = outbox.length ? `${outbox.length} message(s) waiting to be sent…` : "";
+  const sig = JSON.stringify(chat);
+  if (sig === chatSig) return;  // nothing new: leave the box (and the reader's scroll) alone
+  chatSig = sig;
+  const box = $("chat"), top = box.scrollTop, y = window.scrollY;
+  // follow new messages only if you were already at the bottom; if you've scrolled up
+  // to read, stay exactly where you were
+  const atBottom = !lastChatLen || top + box.clientHeight >= box.scrollHeight - 30;
+  box.innerHTML = chat.length ? chat.map(m => `<div class="${m.mine ? "mine" : ""}">
+    <span class="muted">${esc(m.at)}</span> ${m.who ? `<span class="who">${esc(m.who)}:</span>` : ""} ${esc(m.text)}</div>`).join("")
+    : `<div class="empty">No chat read yet.</div>`;
+  box.scrollTop = atBottom ? box.scrollHeight : top;
+  window.scrollTo(0, y);
+  lastChatLen = chat.length || 1;
+}
+async function chatTick() {  // the chat is checked every second, the rest of the page every 5
+  try { const c = await (await fetch("/api/chat")).json(); renderChat(c.chat, c.outbox); } catch {}
+}
+setInterval(chatTick, 1000);
+
+document.addEventListener("click", async (e) => {
+  const t = e.target;
+  if (t.dataset.bid !== undefined) {
+    const c = cards[+t.dataset.bid], amount = $("amt" + t.dataset.bid).value.trim();
+    if (!amount) return alert("Enter how much to bid, e.g. 650B");
+    if (!confirm(`Bid ${amount} on this #${c.serial} card (seller ${c.seller || "?"})?`)) return;
+    await post("/api/request", {kind: "bid", amount, card: c}); refresh();
+  } else if (t.dataset.buy !== undefined) {
+    const c = cards[+t.dataset.buy];
+    if (!confirm(`Buy this #${c.serial} card (seller ${c.seller || "?"}) now for ${c.buy_now}?`)) return;
+    await post("/api/request", {kind: "buy", amount: c.buy_now, card: c}); refresh();
+  } else if (t.dataset.mode) {
+    await post("/api/mode", {mode: t.dataset.mode}); refresh();
+  } else if (t.dataset.do) {
+    if (t.dataset.do === "packs" && !confirm("Open every Rainbow-or-rarer and event pack now?")) return;
+    await post("/api/do", {what: t.dataset.do}); refresh();
+  } else if (t.dataset.cancel) {
+    await post(`/api/request/${t.dataset.cancel}/cancel`); refresh();
+  } else if (t.id === "scan") {
+    await post("/api/scan"); t.textContent = "Asked — the bot will check soon"; setTimeout(() => t.textContent = "Check market now", 4000);
+  }
+});
+
+$("rb-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const count = Math.max(1, Math.min(50, parseInt($("rb-n").value) || 1));
+  if (!confirm(`Rebirth ${count} time${count > 1 ? "s" : ""}? This spends coins.`)) return;
+  await post("/api/rebirth", {count}); refresh();
+});
+
+$("send").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const text = $("msg").value.trim();
+  if (!text) return;
+  await post("/api/chat", {text}); $("msg").value = ""; refresh();
+});
+
+refresh();
+setInterval(refresh, 5000);
+</script>
+</body>
+</html>
