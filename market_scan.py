@@ -214,16 +214,28 @@ def read_listing(game, img, bid):
     return card
 
 
-def top_bidder(game, bid):
-    """Open the BID window for this listing, read 'Top bid: X by Y', and Cancel.
-    Never places a bid."""
-    game.click(bid[0], bid[1])
-    game.park_mouse()
-    game.wait(1.0)
+def _dialog_text(game):
     img = game.frame()
     h, w = img.shape[:2]
     words = read_words(img[int(h * 0.3):int(h * 0.75), int(w * 0.25):int(w * 0.75)], scale=2)
-    text = fix_numbers(" ".join(t for t, _, _ in words))
+    return words, fix_numbers(" ".join(t for t, _, _ in words)), (w, h)
+
+
+def top_bidder(game, bid):
+    """Open the BID window for this listing, read 'Top bid: X by Y', and Cancel.
+    Never places a bid. The window is waited for only as long as it takes to show (and to
+    close), instead of fixed pauses."""
+    game.click(bid[0], bid[1])
+    game.park_mouse()
+    words = text = size = None
+    end = time.time() + 2.0
+    game.wait(0.2)
+    while time.time() < end:
+        words, text, size = _dialog_text(game)
+        if re.search(r"Top\s*bid|Starting\s*bid", text, re.I):
+            break
+        game.wait(0.05)
+    w, h = size
     result = {}
     m = re.search(r"Top\s*bid:?\s*([\d.,]+\s*[KMBTQ]?)\s*by\s+(\S+)", text, re.I)
     if m:
@@ -241,8 +253,26 @@ def top_bidder(game, bid):
     if cancel:
         game.click(int(w * 0.25) + cancel[0][0], int(h * 0.3) + cancel[0][1])
     game.park_mouse()
-    game.wait(0.6)
+    end = time.time() + 1.2
+    while time.time() < end:  # until the window is gone
+        game.wait(0.05)
+        _, text2, _ = _dialog_text(game)
+        if not re.search(r"Top\s*bid|Starting\s*bid|need\s+at\s+least", text2, re.I):
+            break
     return result
+
+
+def _fix_price(price):
+    """A price read without its unit: the "T" of "1.5T" is often read as a 7 ("1.57"), and
+    no price here is a bare number with one decimal ending in 7. Returns (price, trusted)."""
+    if price is None:
+        return None, True
+    if re.search(r"[KMBTQ]$", price):
+        return price, True
+    m = re.fullmatch(r"(\d+\.\d)7", price)
+    if m:
+        return m.group(1) + "T", True
+    return price, False  # no unit and no known misreading: the bid window has to say
 
 
 def wait_for_listings(game, timeout=10):
@@ -577,6 +607,20 @@ def _grid_thumb(img):
     return cv2.cvtColor(cv2.resize(grid, (80, 50)), cv2.COLOR_BGR2GRAY).astype(int)
 
 
+def _settle_grid(game, maxwait=1.0, first=0.12):
+    """Wait until the card grid has stopped moving (a scroll, more cards loading), not a
+    fixed time: two looks 0.1s apart that match."""
+    game.wait(first)
+    prev = _grid_thumb(game.frame())
+    end = time.time() + maxwait
+    while time.time() < end:
+        game.wait(0.1)
+        cur = _grid_thumb(game.frame())
+        if float(np.abs(cur - prev).mean()) < 3.0:
+            return
+        prev = cur
+
+
 WANTED_SERIALS = {"1", "2", "3"}
 DEBUG_PAGES = os.environ.get("SCAN_DEBUG") == "1"
 STOP_AFTER = 12  # this many cards in a row past #3 (two full rows) = we're past them all
@@ -590,8 +634,8 @@ def scan(game, read_bidders=True, max_pages=60, log=print, should_stop=lambda: F
     img = game.frame()
     h, w = img.shape[:2]
     grid_mid = (w / 2, h * 0.55)
-    game.scroll(*grid_mid, 30)  # back to the top
-    game.wait(0.6)
+    game.scroll(*grid_mid, 30, check=False)  # back to the top
+    _settle_grid(game, 1.0)
     found, seen = [], set()
     done = False
     past = 0  # cards in a row with a serial above #3
@@ -633,8 +677,16 @@ def scan(game, read_bidders=True, max_pages=60, log=print, should_stop=lambda: F
             card["image"] = f"card_{len(found):03d}.jpg"
             os.makedirs(CARDS_DIR, exist_ok=True)
             cv2.imwrite(os.path.join(CARDS_DIR, card["image"]), thumb)
-            if read_bidders:
+            # The bid window is only opened when it has something the listing can't give: who
+            # the top bidder is (a listing with a bid on it), or a start price whose unit
+            # couldn't be read. A listing with no bids just has "Start <price>" and no bidder
+            start, trusted = _fix_price(card.get("start"))
+            if start:
+                card["start"] = start
+            if read_bidders and ("start" not in card or not trusted):
                 card.update(top_bidder(game, bid))
+            elif "start" in card:
+                card["top_bidder"] = None
             card["seen_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
             secs = left_seconds(card.get("time_left"))
             if secs is not None:
@@ -649,13 +701,13 @@ def scan(game, read_bidders=True, max_pages=60, log=print, should_stop=lambda: F
         if more:
             game.click(*more)
             game.park_mouse()
-            game.wait(1.5)
+            _settle_grid(game, 2.0)
             stale = 0
             continue
         stale = stale + 1 if new == 0 else 0
         if stale >= 4:
             break  # nothing new for a while and no Show more: the end of the list
-        game.scroll(*grid_mid, -2)
-        game.wait(0.8)
+        game.scroll(*grid_mid, -2, check=False)  # (the market is open: no need to check it each time)
+        _settle_grid(game, 1.0)
     log(f"Scanned {len(seen)} listing(s) over {page + 1} page(s)")
     return found
