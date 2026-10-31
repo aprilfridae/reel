@@ -48,7 +48,11 @@ def _split(line):
 # OCR trying to read something that isn't clean text, so it isn't trusted
 _CLEAN = re.compile(r"^[A-Za-z0-9 .,!?'\"&:;()\-*/+@#$%_<>=~\[\]|]+$")
 # The game's own rotating announcements (they repeat all the time and aren't chat)
-_ANNOUNCEMENT = ("favorite", "favourite", "submit", "leaderboard", "booth", "new updates", "enjoying the game")
+_ANNOUNCEMENT = ("favorite", "favourite", "submit", "leaderboard", "booth", "new updates", "enjoying the game",
+                 "pulled the", "ultra]", "secret]", "in 100,000")  # (the last ones: rare-pull broadcasts)
+
+
+_HINT = re.compile(r"\s*To chat\s*click here.*$", re.I)
 
 
 def _is_announcement(row):
@@ -72,7 +76,7 @@ def _parse(rows):
     A clean row without a name right after a message is its wrapped second line."""
     out, last = [], None
     for row in rows:
-        row = row.strip()
+        row = _HINT.sub("", row).strip()  # Roblox's "To chat click here or press / key" hint can share the row
         if len(row) < 2 or _is_announcement(row):
             last = None
             continue
@@ -113,14 +117,50 @@ def _snap_name(who, roster):
     """A name read slightly wrong ("üpril friC;ue") becomes the known name it's closest
     to. A clean name nobody has used before is kept as it is; a garbled unknown one
     gives None (not trusted)."""
+    roster = {n for n in roster if _NAME.match(n)}
     if who in roster:
         return who
-    clean = bool(_CLEAN.match(who))
+    clean = bool(_NAME.match(who))
     if roster:
         best = max(roster, key=lambda n: SequenceMatcher(None, who.lower(), n.lower()).ratio())
         if SequenceMatcher(None, who.lower(), best.lower()).ratio() >= (0.72 if clean else 0.6):
             return best
     return who if clean else None
+
+
+# A player name: letters, digits, spaces, dots, dashes, underscores (no brackets or odd symbols)
+_NAME_CHARS = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._-]{1,24}$")
+
+
+class _NameMatcher:
+    def match(self, who):
+        # a real name has at most one dot and two underscores; more is OCR noise
+        return bool(_NAME_CHARS.match(who)) and who.count(".") <= 1 and who.count("_") <= 2 and ".." not in who
+
+
+_NAME = _NameMatcher()
+
+
+def _junky(text):
+    """True if the text looks like OCR garbage rather than something a person typed:
+    words mixing letters and digits, capitals in the middle of a word, stray punctuation
+    inside words, or mostly not letters."""
+    words = text.split()
+    if not words:
+        return True
+    bad = 0
+    for w in words:
+        core = w.strip(".,!?'\"()*:;-")
+        if len(core) < 3:
+            continue
+        if re.search(r"\d", core) and re.search(r"[A-Za-z]", core) and not re.fullmatch(r"\d+[A-Za-z]{1,2}|[A-Za-z]{1,2}\d+", core):
+            bad += 1
+        elif re.search(r"[a-z][A-Z]", core) and not core.isupper():
+            bad += 1
+        elif re.search(r"[A-Za-z][^\w'](?=[A-Za-z])", core):
+            bad += 1  # punctuation in the middle of a word ("c.ybersecurity")
+    letters = sum(c.isalpha() for c in text)
+    return bad > 0 or letters < 2 or (len(text) >= 6 and letters / len(text) < 0.55)
 
 
 class Chat:
@@ -129,6 +169,7 @@ class Chat:
         self.every = every
         self.last_read = 0.0
         self.last_deep = 0.0
+        self.seen = []  # messages read once, waiting for a second matching read
         self.sent = []  # texts we sent recently, to mark our own messages
 
     def due(self):
@@ -147,10 +188,12 @@ class Chat:
         if deep:
             self.last_deep = time.time()
         entries = _messages(box, deep)
+        now = time.time()
+        self.seen = [c for c in self.seen if now - c["t"] < 30]  # candidates not confirmed in 30s are dropped
         if not entries:
             return
         at = time.strftime("%H:%M:%S")
-        same = lambda a, b: SequenceMatcher(None, a, b).ratio() > 0.8
+        same = lambda a, b: SequenceMatcher(None, a, b).ratio() > 0.72
 
         def add(stored):
             # What's on screen is the last several messages, so compare with the last
@@ -159,7 +202,7 @@ class Chat:
             recent = [f"{e['who']}: {e['text']}" for e in stored[-60:]]
             for who, text in entries:
                 who = _snap_name(who, roster)
-                if not who:
+                if not who or _junky(text) or len(text) < 2:
                     continue
                 longer = next((e for e in reversed(stored[-15:]) if e["who"] == who and len(text) > len(e["text"])
                                and text.lower().startswith(e["text"].lower()[:max(5, len(e["text"]) - 2)])), None)
@@ -168,6 +211,24 @@ class Chat:
                     continue
                 if any(same(f"{who}: {text}", r) for r in recent):
                     continue
+                # A message is only stored once it has been read twice, about the same
+                # (garbage reads rarely agree with each other, real messages do)
+                cand = next((c for c in self.seen if same(c["who"], who)
+                             and SequenceMatcher(None, c["texts"][0].lower(), text.lower()).ratio() > 0.75), None)
+                if cand is None:
+                    self.seen.append({"who": who, "texts": [text], "t": now})
+                    continue
+                cand["texts"].append(text)
+                texts = cand["texts"]
+                def agree(i):
+                    return sum(SequenceMatcher(None, texts[i].lower(), o.lower()).ratio()
+                               for j, o in enumerate(texts) if j != i) / (len(texts) - 1)
+                top = max(range(len(texts)), key=lambda i: (agree(i), len(texts[i])))
+                best = texts[top]
+                if agree(top) < 0.85:
+                    continue  # the reads disagree too much: wait for a better one
+                self.seen.remove(cand)
+                text = best
                 # A message sent from the website is already listed (it was added the
                 # moment it was typed); the screen showing it just fills in the name
                 echo = next((e for e in reversed(stored[-15:]) if e.get("pending_echo") and text

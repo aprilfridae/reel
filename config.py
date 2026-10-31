@@ -26,6 +26,7 @@ DEFAULTS = {
     "session_end_hour": 6,       # ...and not later than this one
     "nightly_rebirth": True,     # after the nightly packs, spend part of the coins on rebirths
     "rebirth_fraction": 0.25,    # ...this share of the coins on hand
+    "rebirth_forfeits_bids": True,  # coins in active Market bids are lost on a rebirth: go ahead anyway (false = cancel)
     "claim_gifts": True,         # playtime gifts + the daily spin
 }
 

@@ -66,6 +66,7 @@ def main():
     args = ap.parse_args()
     global DRY_REBIRTH
     DRY_REBIRTH = args.dry_run_rebirth
+    rebirth.ALLOW_BID_LOSS = CFG["rebirth_forfeits_bids"]
 
     was_open = find_roblox() is not None
     if not launcher.ensure_running(CFG, log=lambda m: print(m, flush=True)):
