@@ -94,6 +94,7 @@ def state():
         "mode": webstate.load("mode.json", {}),
         "bids": active_bids(market, webstate.load("requests.json", []), now),
         "mybids": webstate.load("mybids.json", {}),
+        "lookup": webstate.load("lookup.json", {}),
         "bid_anyway": bid_anyway(),
         "bids_seen": webstate.load("bids_seen.json", {}),
         "now": time.time(),  # so the page's countdowns use this PC's clock
@@ -155,6 +156,49 @@ def do_once():
         return jsonify(error="what must be packs or index"), 400
     webstate.update("mode.json", {}, lambda m: {**m, "once": sorted(set(m.get("once", [])) | {what})})
     return jsonify(ok=True)
+
+
+RARITIES = ("common", "uncommon", "rare", "epic", "legendary", "mythic", "secret", "glitched", "kawaii", "radiation",
+            "iced", "molten", "charged", "tidal", "spooky", "acid", "meteor", "eclipse", "blood", "atlantis")
+
+
+def _market_request(kind, card, amount=""):
+    req = {"id": uuid.uuid4().hex[:8], "kind": kind, "amount": amount, "card": card, "status": "waiting",
+           "result": "", "asked_at": time.strftime("%Y-%m-%d %H:%M:%S")}
+    webstate.update("requests.json", [], lambda r: r + [req])
+    return req
+
+
+@app.post("/api/lookup")
+def ask_lookup():
+    """Who owns the lowest serials of an artist's card in one rarity (the bot reads it in game)."""
+    body = request.get_json(force=True)
+    artist = str(body.get("artist", "")).strip()[:40]
+    rarity = str(body.get("rarity", "common")).lower()
+    find = str(body.get("find", "")).strip()[:6]
+    if not artist:
+        return jsonify(error="enter an artist name"), 400
+    if rarity not in RARITIES:
+        return jsonify(error="unknown rarity"), 400
+    if find and not find.isdigit():
+        return jsonify(error="the serial to find must be a number"), 400
+    return jsonify(_market_request("lookup", {"artist": artist, "rarity": rarity, "find": find}))
+
+
+@app.post("/api/join")
+def ask_join():
+    """Join the server of the owner of one serial (the bot presses Join server in game)."""
+    body = request.get_json(force=True)
+    artist = str(body.get("artist", "")).strip()[:40]
+    rarity = str(body.get("rarity", "common")).lower()
+    name = str(body.get("name", "")).strip()[:40]
+    try:
+        serial = int(body.get("serial"))
+    except (TypeError, ValueError):
+        return jsonify(error="serial must be a number"), 400
+    if not artist or rarity not in RARITIES or not name:
+        return jsonify(error="artist, rarity and owner are needed"), 400
+    return jsonify(_market_request("join", {"artist": artist, "rarity": rarity, "serial": serial, "name": name}))
 
 
 @app.post("/api/rebirth")

@@ -20,7 +20,7 @@ can get an account banned.
   market listings, your own listings and bids, and your all-time #1 collection; a rebirth
   counter and button (with a "Rebirth anyway" switch for when coins are tied up in Market
   bids, which a rebirth loses); a log of bids and buys; game chat (read and send); your coin
-  balance (updated right after every buy); and a switch between Auto (the schedule), Fish
+  balance (updated right after every buy); a Who owns? lookup (an artist's lowest serials in any rarity, with a Join server button for owners who are online); and a switch between Auto (the schedule), Fish
   only and Paused.
 
 Bids, buys, rebirths and chat from the website interrupt whatever the bot is doing, then it

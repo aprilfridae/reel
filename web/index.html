@@ -141,6 +141,21 @@
   .fold details[open] summary h2 { margin-bottom: 12px; }
   .fold details[open] summary h2::after { content: "\2212"; }
   .fold summary:hover h2 { color: #fff; }
+  .who-form { display: flex; gap: 8px; flex-wrap: wrap; }
+  .who-form input { flex: 1 1 180px; }
+  .who-form input#who-find { flex: 0 1 140px; }
+  select { font: inherit; padding: 8px 11px; border-radius: 10px; border: 1px solid var(--line-strong);
+           background: rgba(8, 7, 18, .7); color: var(--ink); }
+  .who-row { display: flex; align-items: center; gap: 12px; padding: 9px 12px; margin-bottom: 6px; border-radius: 12px;
+             border: 1px solid var(--line); background: rgba(255,255,255,.03); }
+  .who-row .no { min-width: 44px; text-align: center; font-weight: 800; padding: 3px 8px; border-radius: 8px; color: #1a1300;
+                 background: linear-gradient(135deg, #ffe08a, #f2a93b); }
+  .who-row .no.n1 { background: var(--rainbow); background-size: 200% 100%; animation: shimmer 4s linear infinite; }
+  .who-row .no.n2 { background: linear-gradient(135deg, #f1f5f9, #94a3b8); }
+  .who-row .no.n3 { background: linear-gradient(135deg, #fdba74, #c2410c); color: #fff; }
+  .who-row .no.other { background: rgba(255,255,255,.1); color: var(--ink); }
+  .who-row .nm { flex: 1; font-weight: 600; word-break: break-word; }
+  .who-row .on { font-size: 12px; color: var(--good); margin-right: 6px; }
   .leftcol { min-width: 0; display: grid; gap: 14px; align-content: start; }
   .tabs { display: flex; gap: 8px; }
   .tab { background: rgba(255,255,255,.04); color: #d9d4ff; border: 1px solid var(--line-strong); }
@@ -189,6 +204,7 @@
       <button class="tab on" data-tab="market">Market #1–#3</button>
       <button class="tab" data-tab="mine">My listings &amp; bids <span class="count" id="mine-count"></span></button>
       <button class="tab" data-tab="ones">My #1s <span class="count" id="ones-badge"></span></button>
+      <button class="tab" data-tab="who">Who owns?</button>
     </div>
     <section id="tab-market">
       <h2>Serial #1–#3 listings <span class="muted" id="scanned"></span></h2>
@@ -201,6 +217,17 @@
       <div class="cards" id="mine-bids"></div>
       <h3>My listings</h3>
       <div class="cards" id="mine-listings"></div>
+    </section>
+    <section id="tab-who" hidden>
+      <h2>Who owns? <span class="muted" id="who-at"></span></h2>
+      <form class="who-form" id="who-form">
+        <input id="who-artist" placeholder="Artist (part of the name is fine)" autocomplete="off" maxlength="40">
+        <select id="who-rarity"></select>
+        <input id="who-find" placeholder="Find # (optional)" inputmode="numeric" maxlength="6" autocomplete="off">
+        <button>Look up</button>
+      </form>
+      <div class="muted" id="who-status" style="margin:8px 0"></div>
+      <div id="who-rows"></div>
     </section>
     <section id="tab-ones" hidden>
       <h2>My #1s found, all time <span class="muted" id="ones-count"></span></h2>
@@ -354,9 +381,27 @@ function renderMine(mb) {
   setHtml($("mine-listings"), mine.length ? mine.map(m => mineCardHtml(m, at)).join("") : `<div class="empty">You have nothing listed for sale.</div>`);
 }
 
+const RARITIES = ["common", "uncommon", "rare", "epic", "legendary", "mythic", "secret", "glitched", "kawaii", "radiation",
+  "iced", "molten", "charged", "tidal", "spooky", "acid", "meteor", "eclipse", "blood", "atlantis"];
+$("who-rarity").innerHTML = RARITIES.map(r => `<option value="${r}">${r[0].toUpperCase() + r.slice(1)}</option>`).join("");
+
+function renderWho(lk, reqs) {
+  const latest = reqs.filter(r => r.kind === "lookup" || r.kind === "join").slice(-1)[0];
+  const busy = latest && (latest.status === "waiting" || latest.status === "working");
+  $("who-status").textContent = latest ? `${latest.kind === "join" ? "Join" : "Look-up"}: ${latest.status}${latest.result ? " - " + latest.result : ""}` : "";
+  $("who-at").textContent = lk.at ? `${lk.artist} · ${lk.rarity}${lk.exist ? " · " + lk.exist + " exist" : ""} · read ${lk.at}` : "";
+  const rows = lk.rows || [];
+  setHtml($("who-rows"), rows.length ? rows.map((r, i) => `<div class="who-row">
+      <span class="no ${r.serial <= 3 ? "n" + r.serial : "other"}">#${esc(r.serial)}</span>
+      <span class="nm">${esc(r.name || "?")}</span>
+      ${r.join ? `<span class="on">online</span><button data-join="${i}" ${busy ? "disabled" : ""}>Join server</button>` : `<span class="muted">not joinable</span>`}
+    </div>`).join("") : `<div class="empty">${lk.at ? esc(lk.message || "No owners found.") : "Look up an artist to see who owns their lowest serials."}</div>`);
+  window.whoLookup = lk;
+}
+
 function showTab(name) {
   document.querySelectorAll(".tab").forEach(b => b.classList.toggle("on", b.dataset.tab === name));
-  for (const t of ["market", "mine", "ones"]) $("tab-" + t).hidden = name !== t;
+  for (const t of ["market", "mine", "ones", "who"]) $("tab-" + t).hidden = name !== t;
   try { localStorage.setItem("tab", name); } catch {}
 }
 
@@ -429,7 +474,10 @@ async function refresh() {
   $("req-count").textContent = s.requests.length ? `${s.requests.length}${waiting ? " · " + waiting + " active" : ""}` : "";
   setHtml($("requests"), s.requests.length ? s.requests.slice().reverse().map(r => `
     <div class="req">${r.card.image ? `<img src="/static/cards/${esc(r.card.image)}" alt="" style="width:40px;border-radius:4px">` : ""}
-      <div style="flex:1">${r.kind === "rebirth" ? `<b>Rebirth x${esc(r.amount)}</b>` : `<b>${r.kind === "buy" ? "Buy now" : "Bid " + esc(r.amount)}</b> on #${esc(r.card.serial)} from ${esc(r.card.seller || "?")}`}
+      <div style="flex:1">${r.kind === "rebirth" ? `<b>Rebirth x${esc(r.amount)}</b>`
+        : r.kind === "lookup" ? `<b>Who owns ${esc(r.card.artist)}</b> (${esc(r.card.rarity)}${r.card.find ? " #" + esc(r.card.find) : ""})`
+        : r.kind === "join" ? `<b>Join ${esc(r.card.name)}'s server</b> (#${esc(r.card.serial)} ${esc(r.card.artist)})`
+        : `<b>${r.kind === "buy" ? "Buy now" : "Bid " + esc(r.amount)}</b> on #${esc(r.card.serial)} from ${esc(r.card.seller || "?")}`}
       <div class="muted">${esc(r.result || r.asked_at)}</div></div>
       <div><span class="pill ${esc(r.status)}">${esc(r.status)}</span>
       ${r.status === "waiting" ? `<button class="ghost" data-cancel="${esc(r.id)}">Cancel</button>` : ""}</div></div>`).join("")
@@ -437,6 +485,7 @@ async function refresh() {
 
   renderChat(s.chat, s.outbox);
   renderMine(s.mybids || {});
+  renderWho(s.lookup || {}, s.requests);
   tick();
   renderOnes(s.ones || []);
 }
@@ -474,6 +523,11 @@ document.addEventListener("click", async (e) => {
     const c = cards[+t.dataset.buy];
     if (!confirm(`Buy this #${c.serial} card (seller ${c.seller || "?"}) now for ${c.buy_now}?`)) return;
     await post("/api/request", {kind: "buy", amount: c.buy_now, card: c}); refresh();
+  } else if (t.dataset.join !== undefined) {
+    const lk = window.whoLookup || {}, row = (lk.rows || [])[+t.dataset.join];
+    if (!row) return;
+    if (!confirm(`Join ${row.name}'s server?\n\nThe bot leaves the server it is in now (including any server boost there) and fishes in theirs.`)) return;
+    await post("/api/join", {artist: lk.artist, rarity: lk.rarity, serial: row.serial, name: row.name}); refresh();
   } else if (t.dataset.tab) {
     showTab(t.dataset.tab);
   } else if (t.dataset.mode) {
@@ -486,6 +540,14 @@ document.addEventListener("click", async (e) => {
   } else if (t.id === "scan") {
     await post("/api/scan"); t.textContent = "Asked — the bot will check soon"; setTimeout(() => t.textContent = "Check market now", 4000);
   }
+});
+
+$("who-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const artist = $("who-artist").value.trim();
+  if (!artist) return;
+  await post("/api/lookup", {artist, rarity: $("who-rarity").value, find: $("who-find").value.trim()});
+  refresh();
 });
 
 $("anyway").addEventListener("change", async (e) => {

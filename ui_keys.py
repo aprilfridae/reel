@@ -36,3 +36,11 @@ def type_text(text):
             inp.ki = KEYBDINPUT(0, ord(ch), 0x0004 | up, 0, 0)  # KEYEVENTF_UNICODE
             _send(inp)
         time.sleep(0.03)
+
+
+SC_ENTER = 0x1C
+
+
+def press_enter():
+    _sc(SC_ENTER, False)
+    _sc(SC_ENTER, True)

@@ -31,6 +31,7 @@ import launcher
 import market
 import market_scan
 import mybids
+import whoowns
 import rebirth
 import webstate
 from config import load as load_config
@@ -49,6 +50,7 @@ PACK_SESSION_START, PACK_SESSION_LATEST = CFG["session_start_hour"], CFG["sessio
 SESSION_STATE = os.path.join(HERE, "pack_session_done.txt")
 MARKET_EVERY = CFG["market_every_minutes"] * 60  # seconds between market checks
 MARKET_TRIPS = CFG["market_trips"]
+MARKET_KINDS = ("bid", "buy", "lookup", "join")  # website requests that need the Card Market open
 WEB_CHECK_EVERY = 1  # seconds between looks at the website's requests / chat outbox
 REBIRTH_PEEK_EVERY = 1800  # seconds between looks at the Rebirth menu for the website counter
 DRY_REBIRTH = False  # --dry-run-rebirth: do everything but the second (confirming) click
@@ -185,15 +187,16 @@ def main():
         rb["wanted"] = not finished and not DRY_REBIRTH
         rb["peeked"] = time.time()
 
-    def waiting_requests(kinds=("bid", "buy")):
-        """Requests from the website still waiting, of these kinds (bids/buys by default)."""
+    def waiting_requests(kinds=MARKET_KINDS):
+        """Requests from the website still waiting, of these kinds (the ones that need the
+        market by default)."""
         reqs = [r for r in webstate.load("requests.json", [])
                 if r["status"] == "waiting" and r["kind"] in kinds]
-        if reqs and not MARKET_TRIPS and any(k in kinds for k in ("bid", "buy")):
+        if reqs and not MARKET_TRIPS and any(k in kinds for k in MARKET_KINDS):
             for r in reqs:
-                if r["kind"] in ("bid", "buy"):
+                if r["kind"] in MARKET_KINDS:
                     set_request(r["id"], status="failed", result="market trips are switched off for now")
-            reqs = [r for r in reqs if r["kind"] not in ("bid", "buy")]
+            reqs = [r for r in reqs if r["kind"] not in MARKET_KINDS]
         return reqs
 
     def do_rebirth_requests():
@@ -227,7 +230,7 @@ def main():
         few seconds, not every frame)."""
         if time.time() - web["checked"] > WEB_CHECK_EVERY:
             web["checked"] = time.time()
-            web["wants"] = (talk.pending() or bool(waiting_requests(("bid", "buy", "rebirth")))
+            web["wants"] = (talk.pending() or bool(waiting_requests(MARKET_KINDS + ("rebirth",)))
                             or market_due() or rb_peek_due())
         return web["wants"]
 
@@ -239,15 +242,28 @@ def main():
             return reqs
         webstate.update("requests.json", [], fn)
 
+    jr = {"joined": False}  # set when "Join server" was pressed: the game is moving us elsewhere
+
     def do_requests():
-        """Place every waiting bid / buy (the market is already open)."""
+        """Do every waiting bid / buy / owner lookup / server join (the market is already open)."""
         for r in waiting_requests():
-            set_request(r["id"], status="working", result="placing it now...")
+            set_request(r["id"], status="working", result={"lookup": "looking it up...", "join": "joining..."}
+                        .get(r["kind"], "placing it now..."))
+            card = r.get("card", {})
             try:
                 if r["kind"] == "bid":
-                    ok, msg = market_scan.place_bid(game, r["card"], r["amount"])
-                else:
-                    ok, msg = market_scan.buy_now(game, r["card"], r["amount"])
+                    ok, msg = market_scan.place_bid(game, card, r["amount"])
+                elif r["kind"] == "buy":
+                    ok, msg = market_scan.buy_now(game, card, r["amount"])
+                elif r["kind"] == "lookup":
+                    res = whoowns.lookup(game, card.get("artist", ""), card.get("rarity", "common"),
+                                         card.get("find") or None, log=log)
+                    ok, msg = res["ok"] and bool(res["rows"]), (f"{len(res['rows'])} owner(s) read" if res["rows"] else res["message"])
+                else:  # join
+                    ok, msg = whoowns.join(game, card.get("artist", ""), card.get("rarity", "common"),
+                                           card.get("serial", 0), card.get("name", ""), log=log)
+                    if ok:
+                        jr["joined"] = True
             except StopBot:
                 raise
             except Exception as e:  # keep the bot alive; report it on the website
@@ -255,11 +271,16 @@ def main():
             set_request(r["id"], status="done" if ok else "failed",
                         result=f"{msg} ({datetime.now():%H:%M})")
             log(("Done: " if ok else "Failed: ") + msg)
-            if ok:  # the money counter on the website, straight away
+            if ok and r["kind"] in ("bid", "buy"):  # the money counter on the website, straight away
                 now = coins.after_spending()
                 if now:
                     log(f"Balance now {now}")
+            if jr["joined"]:
+                break  # the world is changing: nothing else can be done from here
         req["checked"] = 0
+
+    def teleport_back():
+        teleport_to_fishing(game)
 
     def market_trip():
         """Go to the Card Market: place waiting bids / buys, then scan the #1-#3
@@ -283,6 +304,14 @@ def main():
             return
         try:
             do_requests()
+            if jr["joined"]:
+                jr["joined"] = False
+                log("Joining another server; waiting for it to load...")
+                launcher.wait_in_game(game, timeout=150, log=log)
+                return
+            if reqs and all(r["kind"] == "lookup" for r in reqs) and not market_due():
+                gifts.close_menus(game)  # only owners were looked up: no need for a whole market scan
+                return teleport_back()
             # The scan takes a couple of minutes; a bid/buy that comes in meanwhile cuts
             # it short, gets placed right away (already at the market), then it rescans
             for _ in range(3):
@@ -386,7 +415,7 @@ def main():
         return False
 
     def act():
-        if waiting_requests(("bid", "buy", "rebirth")) or market_due():  # bids / buys first
+        if waiting_requests(MARKET_KINDS + ("rebirth",)) or market_due():  # bids / buys first
             market_trip()
         if rb_peek_due():
             rebirth_peek()
