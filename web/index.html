@@ -1,197 +1,157 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark">
-<meta name="theme-color" content="#07070d">
-<title>Underground RNG Control Room</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
+<meta name="theme-color" content="#000000">
+<title>fridaes pack bot</title>
 <style>
+  /* fridaes pack bot: black, white, lowercase. one spacing unit (16px) for every gap, padding and margin. */
   :root {
     color-scheme: dark;
-    --bg: #07070d; --panel: rgba(21, 19, 36, .72); --panel-solid: #14122a; --ink: #eceaff; --muted: #8d89aa;
-    --line: rgba(255, 255, 255, .09); --line-strong: rgba(255, 255, 255, .16);
-    --accent: #a78bfa; --accent2: #22d3ee; --accent3: #f472b6; --accent-ink: #0b0a14;
-    --good: #4ade80; --bad: #ff6b81; --warn: #fbbf24;
-    --grad: linear-gradient(120deg, #7c5cff 0%, #22d3ee 55%, #f472b6 110%);
-    --rainbow: linear-gradient(90deg,#ff4d4d,#ffb54d,#f7f04d,#4dd97a,#4db8ff,#a64dff,#ff4d4d);
-    --glow: 0 0 0 1px rgba(167, 139, 250, .35), 0 8px 30px -8px rgba(124, 92, 255, .55);
+    --u: 16px;
+    --fg: #fff; --bg: #000;
+    --line: 1px solid #fff;
+    --dim: #fff; /* (no greys: emphasis is by weight, underline and inversion, not by colour) */
   }
-  * { box-sizing: border-box; }
-  html { background: var(--bg); }
-  body { margin: 0; color: var(--ink); min-height: 100vh;
-         font: 15px/1.45 "Outfit", "Space Grotesk", system-ui, -apple-system, "Segoe UI", sans-serif;
-         background:
-           radial-gradient(900px 520px at 8% -8%, rgba(124, 92, 255, .24), transparent 60%),
-           radial-gradient(820px 520px at 96% 4%, rgba(34, 211, 238, .16), transparent 60%),
-           radial-gradient(900px 600px at 50% 112%, rgba(244, 114, 182, .14), transparent 60%),
-           var(--bg);
-         background-attachment: fixed; }
-  ::selection { background: rgba(167, 139, 250, .45); }
-  * { scrollbar-width: thin; scrollbar-color: #3a3560 transparent; }
-  ::-webkit-scrollbar { width: 9px; height: 9px; }
-  ::-webkit-scrollbar-thumb { background: #3a3560; border-radius: 9px; }
+  * { box-sizing: border-box; text-transform: lowercase; margin: 0; padding: 0; }
+  html, body { background: var(--bg); }
+  body { color: var(--fg); min-height: 100vh; font: 14px/1.5 ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace; }
+  ::selection { background: #fff; color: #000; }
+  * { scrollbar-width: thin; scrollbar-color: #fff #000; }
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-thumb { background: #fff; }
+  ::-webkit-scrollbar-track { background: #000; }
+  [hidden] { display: none !important; }
+  img { max-width: 100%; }
 
-  header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between;
-           padding: 14px 20px; position: sticky; top: 0; z-index: 5;
-           background: rgba(10, 9, 20, .72); backdrop-filter: blur(14px) saturate(1.4);
-           border-bottom: 1px solid var(--line); }
-  header::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 1px;
-                  background: var(--grad); opacity: .55; }
-  h1 { font-size: 20px; margin: 0; font-weight: 700; letter-spacing: .2px; display: flex; align-items: center; gap: 10px; }
-  h1 .logo { background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent;
-             filter: drop-shadow(0 0 8px rgba(124, 92, 255, .8)); }
-  h1 .sub { font-size: 12px; font-weight: 500; color: var(--muted); letter-spacing: 2px; text-transform: uppercase; }
-  .status { color: var(--muted); font-size: 13px; display: flex; align-items: center; gap: 7px; }
-  .status::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--good);
-                    box-shadow: 0 0 10px var(--good); animation: pulse 2s ease-in-out infinite; flex: none; }
-  #outbox.status::before { display: none; }
-  @keyframes pulse { 50% { opacity: .35; transform: scale(.8); } }
-  .balance { border: 1px solid var(--line-strong); border-radius: 12px; padding: 6px 14px;
-             background: linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.02)); }
-  .balance b { font-size: 19px; color: #ffd166; text-shadow: 0 0 14px rgba(255, 209, 102, .55); }
-  .balance .muted { font-size: 12px; }
+  header { display: flex; flex-wrap: wrap; gap: var(--u); align-items: center; justify-content: space-between;
+           padding: var(--u); position: sticky; top: 0; z-index: 5; background: var(--bg); border-bottom: var(--line); }
+  .brand { display: flex; align-items: center; gap: var(--u); }
+  .logo { width: 4var(--u); height: 4var(--u); object-fit: contain; display: block; flex: none; }
+  .logo.spin { animation: spin 6s linear infinite; }
+  .ring { border: 2px solid #fff; border-top-color: transparent; border-radius: 50%; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .logo.spin { animation-duration: 24s; } }
+  h1 { font-size: 20px; font-weight: 700; letter-spacing: 1px; }
+  .status { font-size: 12px; }
+  .status::before { content: "\25CF  "; }
+  #outbox.status::before { content: ""; }
+  .head-right { display: flex; gap: var(--u); align-items: center; flex-wrap: wrap; }
+  .balance { border: var(--line); padding: var(--u) var(--u); }
+  .balance b { font-size: 16px; }
+  .muted { font-size: 12px; font-weight: normal; }
 
-  main { display: grid; grid-template-columns: 1fr 370px; gap: 18px; padding: 18px 20px; max-width: 1500px; margin: 0 auto; }
+  main { display: grid; grid-template-columns: 1fr 384px; gap: var(--u); padding: var(--u); max-width: 1536px; margin: 0 auto; }
   @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
-  section { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 16px; min-width: 0;
-            backdrop-filter: blur(10px); box-shadow: 0 10px 40px -18px rgba(0, 0, 0, .8), inset 0 1px 0 rgba(255,255,255,.05); }
-  h2 { font-size: 13px; margin: 0 0 12px; display: flex; justify-content: space-between; align-items: center; gap: 8px;
-       text-transform: uppercase; letter-spacing: 1.6px; font-weight: 700; color: #cfc9f5; }
-  h2::before { content: ""; width: 4px; height: 14px; border-radius: 3px; background: var(--grad);
-               box-shadow: 0 0 10px rgba(124, 92, 255, .8); margin-right: 2px; }
-  h2 { justify-content: flex-start; }
-  h2 .muted { margin-left: auto; text-transform: none; letter-spacing: 0; }
-  #tab-ones h2 { flex-wrap: wrap; }
-  #tab-ones h2 .muted { flex-basis: 100%; margin: 4px 0 0; }
-  .muted { color: var(--muted); font-size: 13px; font-weight: normal; }
+  section { border: var(--line); padding: var(--u); min-width: 0; }
+  aside, .leftcol { display: grid; gap: var(--u); align-content: start; min-width: 0; }
+  h2 { font-size: 14px; font-weight: 700; letter-spacing: 1px; margin-bottom: var(--u); display: flex; gap: var(--u); align-items: baseline; justify-content: space-between; }
+  h2 .muted { margin-left: auto; letter-spacing: 0; }
+  h3 { font-size: 12px; font-weight: 700; margin: var(--u) 0; text-decoration: underline; }
 
-  button { font: inherit; border: 0; border-radius: 10px; padding: 8px 14px; cursor: pointer;
-           background: var(--grad); color: #0b0a14; font-weight: 700; letter-spacing: .2px;
-           transition: transform .12s ease, box-shadow .2s ease, filter .2s ease; }
-  button:hover { transform: translateY(-1px); box-shadow: var(--glow); filter: brightness(1.08); }
-  button:active { transform: translateY(0) scale(.98); }
-  button.ghost { background: rgba(255, 255, 255, .04); color: #d9d4ff; border: 1px solid var(--line-strong); }
-  button.ghost:hover { background: rgba(167, 139, 250, .14); border-color: rgba(167, 139, 250, .6); }
-  button:disabled { opacity: .5; cursor: default; }
-  input { font: inherit; padding: 8px 11px; border-radius: 10px; border: 1px solid var(--line-strong);
-          background: rgba(8, 7, 18, .7); color: var(--ink); min-width: 0; outline: none; transition: border-color .15s, box-shadow .15s; }
-  input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(167, 139, 250, .22); }
-  input::placeholder { color: #5f5b7d; }
+  button { font: inherit; color: var(--fg); background: transparent; border: var(--line); height: 40px; padding: 0 var(--u);
+           cursor: pointer; border-radius: 0; font-weight: 700; }
+  button:hover, button:focus-visible { background: #fff; color: #000; outline: none; }
+  button:active { opacity: .7; }
+  button:disabled { opacity: .4; cursor: default; background: transparent; color: var(--fg); }
+  button.ghost { font-weight: 400; }
+  input, select { font: inherit; color: var(--fg); background: var(--bg); border: var(--line); height: 40px; padding: 0 var(--u);
+                  border-radius: 0; min-width: 0; outline: none; }
+  input:focus, select:focus { outline: 1px solid #fff; outline-offset: 2px; }
+  input::placeholder { color: #fff; opacity: .5; }
+  input[type=checkbox] { height: auto; }
+  select option { background: #000; color: #fff; }
 
-  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; }
-  .card { border: 1px solid var(--line); border-radius: 14px; overflow: hidden; display: flex; flex-direction: column;
-          background: linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,.015));
-          transition: transform .18s ease, box-shadow .25s ease, border-color .25s ease; }
-  .card:hover { transform: translateY(-3px); border-color: rgba(167, 139, 250, .55);
-                box-shadow: 0 14px 40px -14px rgba(124, 92, 255, .6); }
-  .card img { width: 100%; height: auto; display: block; background: #000; }
-  .card .body { padding: 11px; display: grid; gap: 4px; font-size: 13px; }
-  .card .name { font-weight: 700; font-size: 14px; display: flex; gap: 6px; align-items: center; }
-  .serial { font-size: 12px; font-weight: 800; padding: 2px 9px; border-radius: 7px; color: #1a1300;
-            background: linear-gradient(135deg, #ffe08a, #f2a93b); box-shadow: 0 0 12px rgba(242, 169, 59, .45); }
-  .serial.one { background: var(--rainbow); background-size: 200% 100%; animation: shimmer 4s linear infinite;
-                box-shadow: 0 0 14px rgba(166, 77, 255, .6); }
-  @keyframes shimmer { to { background-position: 200% 0; } }
-  .row { display: flex; justify-content: space-between; gap: 8px; }
-  .k { color: var(--muted); }
-  .actions { display: flex; gap: 6px; padding: 0 11px 11px; flex-wrap: wrap; }
+  .tabs { display: flex; gap: var(--u); flex-wrap: wrap; }
+  .tab.on, .modes button.on { background: #fff; color: #000; }
+  .tab .count { margin-left: var(--u); }
+  .tab .count:empty { display: none; }
+  .tab .count::before { content: "("; } .tab .count::after { content: ")"; }
+
+  .modes { display: flex; gap: var(--u); flex-wrap: wrap; }
+  #mode-note, #who-status, #mine-sum { margin: var(--u) 0; min-height: 1.5em; }
+  form.send, .who-form { display: flex; gap: var(--u); flex-wrap: wrap; margin-top: var(--u); }
+  form.send input, .who-form input { flex: 1 1 160px; }
+  .who-form { margin-top: 0; }
+  .who-form input#who-find { flex: 0 1 144px; }
+  #rb-n { width: 80px; flex: none; }
+  .rb-stats { display: flex; gap: var(--u); align-items: baseline; flex-wrap: wrap; }
+  #rb-count { font-size: 24px; font-weight: 700; }
+
+  .bidbox { display: flex; align-items: center; gap: var(--u); margin: var(--u) 0; padding: var(--u) var(--u); border: 1px dashed #fff; }
+  .bidbox .dot { width: 8px; height: 8px; background: #fff; flex: none; }
+  .bidbox.has { border-style: solid; font-weight: 700; }
+  .switch { display: flex; align-items: center; gap: var(--u); cursor: pointer; user-select: none; }
+  .switch input { position: absolute; opacity: 0; width: 0; height: 0; }
+  .switch .track { width: 4var(--u); height: 24px; border: var(--line); position: relative; flex: none; }
+  .switch .thumb { position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; background: #fff; }
+  .switch input:checked + .track { background: #fff; }
+  .switch input:checked + .track .thumb { transform: translateX(24px); background: #000; }
+  .switch input:focus-visible + .track { outline: 1px solid #fff; outline-offset: 2px; }
+
+  .cards, .ones { display: grid; grid-template-columns: repeat(auto-fill, minmax(192px, 1fr)); gap: var(--u); }
+  .card, .one { border: var(--line); display: flex; flex-direction: column; min-width: 0; }
+  .card:hover, .one:hover { outline: 1px solid #fff; outline-offset: 4px; }
+  .card img, .one img { width: 100%; height: auto; display: block; background: #000; }
+  .card .body { padding: var(--u); display: grid; gap: var(--u); }
+  .card .name { font-weight: 700; display: flex; gap: var(--u); align-items: center; }
+  .card .tag { display: flex; justify-content: space-between; align-items: center; gap: var(--u); }
+  .row { display: flex; justify-content: space-between; gap: var(--u); }
+  .k { opacity: .6; }
+  .actions { display: flex; gap: var(--u); padding: 0 var(--u) var(--u); flex-wrap: wrap; }
   .actions input { flex: 1; width: 80px; }
-  .req { border-bottom: 1px solid var(--line); padding: 9px 0; font-size: 13px; display: flex; gap: 8px; align-items: center; justify-content: space-between; }
-  .req:last-child { border-bottom: 0; }
-  .pill { font-size: 11px; font-weight: 700; padding: 2px 9px; border-radius: 99px; border: 1px solid var(--line-strong);
-          white-space: nowrap; text-transform: uppercase; letter-spacing: .6px; }
-  .pill.done { color: var(--good); border-color: rgba(74, 222, 128, .45); background: rgba(74, 222, 128, .08); }
-  .pill.failed { color: var(--bad); border-color: rgba(255, 107, 129, .45); background: rgba(255, 107, 129, .08); }
-  .pill.waiting, .pill.working { color: var(--warn); border-color: rgba(251, 191, 36, .45); background: rgba(251, 191, 36, .08); }
-  .chat { height: 420px; overflow-y: auto; font-size: 13px; display: flex; flex-direction: column; gap: 4px;
-          border: 1px solid var(--line); border-radius: 12px; padding: 10px; background: rgba(6, 5, 14, .6); }
-  .chat > div { padding: 3px 8px; border-radius: 8px; word-break: break-word; }
-  .chat > div:hover { background: rgba(255, 255, 255, .04); }
-  .modes { display: flex; gap: 7px; flex-wrap: wrap; }
-  .modes button.on { background: var(--grad); color: #0b0a14; border-color: transparent; box-shadow: var(--glow); }
-  .chat .who { font-weight: 700; color: var(--accent2); }
-  .chat .mine { background: rgba(167, 139, 250, .1); }
-  .chat .mine .who { color: var(--accent); }
-  form.send { display: flex; gap: 7px; margin-top: 10px; }
-  form.send input { flex: 1; }
-  .empty { color: var(--muted); padding: 22px 0; text-align: center; }
-  .wide { max-width: 1500px; margin: 0 auto; padding: 0 20px 30px; }
-  .ones { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 14px; }
-  .one { border: 1px solid var(--line); border-radius: 14px; overflow: hidden; background: rgba(255,255,255,.03);
-         transition: transform .18s ease, box-shadow .25s ease, border-color .25s ease; }
-  .one:hover { transform: translateY(-3px) scale(1.01); border-color: rgba(34, 211, 238, .5);
-               box-shadow: 0 14px 40px -14px rgba(34, 211, 238, .45); }
-  .one img { width: 100%; height: auto; display: block; }
-  .one .meta { display: flex; justify-content: space-between; align-items: center; gap: 6px;
-               padding: 8px 10px; font-size: 12px; color: var(--muted); }
-  .chip { font-size: 11px; font-weight: 700; padding: 2px 9px; border-radius: 99px; color: #fff; }
-  .chip.blood { background: linear-gradient(135deg, #e11d48, #7f1d1d); box-shadow: 0 0 10px rgba(225, 29, 72, .5); }
-  .chip.eclipse { background: linear-gradient(135deg, #f59e0b, #b45309); box-shadow: 0 0 10px rgba(245, 158, 11, .5); }
-  .chip.other { background: var(--grad); color: #0b0a14; }
-  aside { display: grid; gap: 18px; align-content: start; }
-  #rb-count { background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent;
-              filter: drop-shadow(0 0 10px rgba(124, 92, 255, .6)); }
+  .serial { font-size: 12px; font-weight: 700; padding: 0 var(--u); border: var(--line); }
+  .serial.one { background: #fff; color: #000; }
+  .countdown { font-variant-numeric: tabular-nums; }
+  .countdown.hot { text-decoration: underline; }
+  .one .meta { display: flex; justify-content: space-between; align-items: center; gap: var(--u); padding: var(--u) var(--u); font-size: 12px; }
+  .chip { font-size: 12px; font-weight: 700; padding: 0 var(--u); border: var(--line); }
+
+  .req { border-bottom: var(--line); padding: var(--u) 0; display: flex; gap: var(--u); align-items: center; justify-content: space-between; }
+  .req:first-child { padding-top: 0; }
+  .req:last-child { border-bottom: 0; padding-bottom: 0; }
+  .req img { width: 40px; flex: none; }
+  .req .grow { flex: 1; min-width: 0; }
+  .pill { font-size: 12px; font-weight: 700; padding: 0 var(--u); border: var(--line); white-space: nowrap; }
+  .pill.done, .pill.winning { background: #fff; color: #000; }
+  .pill.failed, .pill.outbid { border-style: dashed; text-decoration: line-through; }
+  .pill.waiting, .pill.working { border-style: dotted; }
+
   .fold summary { list-style: none; cursor: pointer; display: block; }
   .fold summary::-webkit-details-marker { display: none; }
   .fold summary h2 { margin: 0; }
-  .fold summary h2::after { content: "+"; margin-left: 8px; color: var(--accent2); font-weight: 700; order: 3; }
-  .fold details[open] summary h2 { margin-bottom: 12px; }
+  .fold summary h2::after { content: "+"; margin-left: var(--u); }
+  .fold details[open] summary h2 { margin-bottom: var(--u); }
   .fold details[open] summary h2::after { content: "\2212"; }
-  .fold summary:hover h2 { color: #fff; }
-  .who-form { display: flex; gap: 8px; flex-wrap: wrap; }
-  .who-form input { flex: 1 1 180px; }
-  .who-form input#who-find { flex: 0 1 140px; }
-  select { font: inherit; padding: 8px 11px; border-radius: 10px; border: 1px solid var(--line-strong);
-           background: rgba(8, 7, 18, .7); color: var(--ink); }
-  .who-row { display: flex; align-items: center; gap: 12px; padding: 9px 12px; margin-bottom: 6px; border-radius: 12px;
-             border: 1px solid var(--line); background: rgba(255,255,255,.03); }
-  .who-row .no { min-width: 44px; text-align: center; font-weight: 800; padding: 3px 8px; border-radius: 8px; color: #1a1300;
-                 background: linear-gradient(135deg, #ffe08a, #f2a93b); }
-  .who-row .no.n1 { background: var(--rainbow); background-size: 200% 100%; animation: shimmer 4s linear infinite; }
-  .who-row .no.n2 { background: linear-gradient(135deg, #f1f5f9, #94a3b8); }
-  .who-row .no.n3 { background: linear-gradient(135deg, #fdba74, #c2410c); color: #fff; }
-  .who-row .no.other { background: rgba(255,255,255,.1); color: var(--ink); }
-  .who-row .nm { flex: 1; font-weight: 600; word-break: break-word; }
-  .who-row .on { font-size: 12px; color: var(--good); margin-right: 6px; }
-  .leftcol { min-width: 0; display: grid; gap: 14px; align-content: start; }
-  .tabs { display: flex; gap: 8px; }
-  .tab { background: rgba(255,255,255,.04); color: #d9d4ff; border: 1px solid var(--line-strong); }
-  .tab.on { background: var(--grad); color: #0b0a14; border-color: transparent; box-shadow: var(--glow); }
-  .tab .count { margin-left: 6px; padding: 0 7px; border-radius: 99px; background: rgba(0,0,0,.28); color: #fff; font-size: 12px; }
-  .tab .count:empty { display: none; }
-  [hidden] { display: none !important; }
-  h3 { font-size: 12px; margin: 14px 0 8px; text-transform: uppercase; letter-spacing: 1.4px; color: var(--muted); }
-  .card .tag { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
-  .pill.winning { color: var(--good); border-color: rgba(74, 222, 128, .45); background: rgba(74, 222, 128, .08); }
-  .pill.outbid { color: var(--bad); border-color: rgba(255, 107, 129, .45); background: rgba(255, 107, 129, .08); }
-  #mode-note { min-height: 1.3em; }
-  .bidbox { display: flex; align-items: center; gap: 8px; margin: 12px 0 8px; padding: 8px 12px; font-size: 13px;
-            border-radius: 10px; border: 1px solid var(--line-strong); background: rgba(255, 255, 255, .03); }
-  .bidbox .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--good); box-shadow: 0 0 10px var(--good); flex: none; }
-  .bidbox.has { border-color: rgba(251, 191, 36, .5); background: rgba(251, 191, 36, .07); }
-  .bidbox.has .dot { background: var(--warn); box-shadow: 0 0 10px var(--warn); }
-  .switch { display: flex; align-items: center; gap: 10px; cursor: pointer; user-select: none; font-size: 14px; }
-  .switch input { position: absolute; opacity: 0; width: 0; height: 0; }
-  .switch .track { width: 44px; height: 24px; border-radius: 99px; background: rgba(255, 255, 255, .12); position: relative;
-                   border: 1px solid var(--line-strong); transition: background .2s, box-shadow .2s; flex: none; }
-  .switch .thumb { position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; background: #cfc9f5;
-                   transition: transform .2s, background .2s; }
-  .switch input:checked + .track { background: var(--grad); box-shadow: var(--glow); border-color: transparent; }
-  .switch input:checked + .track .thumb { transform: translateX(20px); background: #fff; }
-  .switch input:focus-visible + .track { outline: 2px solid var(--accent); outline-offset: 2px; }
-  .countdown { font-variant-numeric: tabular-nums; }
+  .fold summary:hover h2 { text-decoration: underline; }
+
+  .chat { height: 416px; overflow-y: auto; display: flex; flex-direction: column; gap: var(--u); border: var(--line); padding: var(--u); }
+  .chat .who { font-weight: 700; }
+  .chat .mine { border-left: 2px solid #fff; padding-left: var(--u); }
+  .empty { padding: var(--u) 0; text-align: center; opacity: .6; }
+
+  .who-row { display: flex; align-items: center; gap: var(--u); padding: var(--u) var(--u); margin-bottom: var(--u); border: var(--line); }
+  .who-row .no { min-width: 4var(--u); text-align: center; font-weight: 700; border: var(--line); padding: 0 var(--u); }
+  .who-row .no.n1 { background: #fff; color: #000; }
+  .who-row .nm { flex: 1; font-weight: 700; word-break: break-word; }
+  .who-row .on { font-size: 12px; }
 </style>
 </head>
 <body>
 <header>
   <div>
-    <h1><span class="logo">&#9670;</span> Underground RNG <span class="sub">control room</span></h1>
-    <div class="status" id="status">connecting…</div>
+    <div class="brand">
+      <img id="logo" class="logo spin" alt="" hidden>
+      <span id="logo-fallback" class="logo ring spin"></span>
+      <div>
+        <h1>fridaes pack bot</h1>
+        <div class="status" id="status">connecting…</div>
+      </div>
+    </div>
   </div>
-  <div style="display:flex;gap:12px;align-items:center">
+  <div class="head-right">
     <div class="balance" title="Coins you have right now (coins held in your active bids aren't included)">
       <span class="muted">Balance</span> <b id="balance">…</b> <span class="muted" id="balance-at"></span>
     </div>
@@ -212,7 +172,7 @@
     </section>
     <section id="tab-mine" hidden>
       <h2>My listings &amp; bids <span class="muted" id="mine-at"></span></h2>
-      <div class="muted" id="mine-sum" style="margin-bottom:10px"></div>
+      <div class="muted" id="mine-sum"></div>
       <h3>Bids</h3>
       <div class="cards" id="mine-bids"></div>
       <h3>My listings</h3>
@@ -226,7 +186,7 @@
         <input id="who-find" placeholder="Find # (optional)" inputmode="numeric" maxlength="6" autocomplete="off">
         <button>Look up</button>
       </form>
-      <div class="muted" id="who-status" style="margin:8px 0"></div>
+      <div class="muted" id="who-status"></div>
       <div id="who-rows"></div>
     </section>
     <section id="tab-ones" hidden>
@@ -242,7 +202,7 @@
         <button class="ghost" data-mode="fish" title="Only fish. No pack sessions, rebirths, Index or hourly market checks">Fish only</button>
         <button class="ghost" data-mode="pause" title="Do nothing (chat, bids and rebirths from here still go through)">Paused</button>
       </div>
-      <div class="muted" id="mode-note" style="margin:6px 0"></div>
+      <div class="muted" id="mode-note"></div>
       <div class="modes">
         <button class="ghost" data-do="packs">Open packs now</button>
         <button class="ghost" data-do="index">Record #1s now</button>
@@ -250,8 +210,8 @@
     </section>
     <section>
       <h2>Rebirth <span class="muted" id="rb-at"></span></h2>
-      <div style="display:flex;gap:16px;align-items:baseline;flex-wrap:wrap">
-        <div><span class="muted">Rebirths</span> <b id="rb-count" style="font-size:22px">?</b></div>
+      <div class="rb-stats">
+        <div><span class="muted">Rebirths</span> <b id="rb-count">?</b></div>
         <div><span class="muted">Next costs</span> <b id="rb-cost">?</b></div>
         <div><span class="muted">Luck</span> <b id="rb-luck">?</b></div>
       </div>
@@ -260,8 +220,8 @@
         <input type="checkbox" id="anyway"><span class="track"><span class="thumb"></span></span>
         <span class="switch-label">Rebirth anyway <span class="muted" id="anyway-note"></span></span>
       </label>
-      <form class="send" id="rb-form" style="margin-top:10px">
-        <input id="rb-n" type="number" min="1" max="50" value="1" style="width:70px" title="How many times">
+      <form class="send" id="rb-form">
+        <input id="rb-n" type="number" min="1" max="50" value="1" title="how many times">
         <button id="rb-go">Rebirth</button>
       </form>
     </section>
@@ -284,6 +244,21 @@
 </main>
 <script>
 const $ = (id) => document.getElementById(id);
+// the page is all lowercase, including its pop-up dialogs
+const _confirm = window.confirm.bind(window), _alert = window.alert.bind(window);
+window.confirm = (m) => _confirm(String(m).toLowerCase());
+window.alert = (m) => _alert(String(m).toLowerCase());
+
+// the logo: web/static/logo.svg, .gif, .webp or .png (the first that exists), spinning unless it's a gif
+(async function findLogo() {
+  try {
+    const f = (await (await fetch("/api/logo")).json()).file;
+    if (!f) return;  // none: the white spinning ring stays
+    const img = $("logo");
+    img.src = "/static/" + f; img.hidden = false; $("logo-fallback").hidden = true;
+    img.classList.toggle("spin", !f.endsWith(".gif"));
+  } catch {}
+})();
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 let lastChatLen = 0;
 
@@ -383,7 +358,7 @@ function renderMine(mb) {
 
 const RARITIES = ["common", "uncommon", "rare", "epic", "legendary", "mythic", "secret", "glitched", "kawaii", "radiation",
   "iced", "molten", "charged", "tidal", "spooky", "acid", "meteor", "eclipse", "blood", "atlantis"];
-$("who-rarity").innerHTML = RARITIES.map(r => `<option value="${r}">${r[0].toUpperCase() + r.slice(1)}</option>`).join("");
+$("who-rarity").innerHTML = RARITIES.map(r => `<option value="${r}">${r}</option>`).join("");
 
 function renderWho(lk, reqs) {
   const latest = reqs.filter(r => r.kind === "lookup" || r.kind === "join").slice(-1)[0];
@@ -410,7 +385,7 @@ function tick() {
   document.querySelectorAll("[data-mine-ends]").forEach(el => {
     const left = +el.dataset.mineEnds - now;
     el.textContent = left <= 0 ? "ended" : fmtLeft(left);
-    el.style.color = left > 0 && left < 300 ? "var(--bad)" : "";
+    el.classList.toggle("hot", left > 0 && left < 300);
   });
   document.querySelectorAll("[data-ends]").forEach(el => {
     const left = +el.dataset.ends - now;
@@ -420,7 +395,7 @@ function tick() {
       return;
     }
     el.textContent = fmtLeft(left);
-    el.style.color = left < 300 ? "var(--bad)" : "";
+    el.classList.toggle("hot", left < 300);
   });
   if ($("cards") && cards.length && !$("cards").querySelector(".card")) {
     $("cards").innerHTML = `<div class="empty">Those listings have ended. The next market check will bring in new ones.</div>`;
@@ -473,8 +448,8 @@ async function refresh() {
   const waiting = s.requests.filter(r => r.status === "waiting" || r.status === "working").length;
   $("req-count").textContent = s.requests.length ? `${s.requests.length}${waiting ? " · " + waiting + " active" : ""}` : "";
   setHtml($("requests"), s.requests.length ? s.requests.slice().reverse().map(r => `
-    <div class="req">${r.card.image ? `<img src="/static/cards/${esc(r.card.image)}" alt="" style="width:40px;border-radius:4px">` : ""}
-      <div style="flex:1">${r.kind === "rebirth" ? `<b>Rebirth x${esc(r.amount)}</b>`
+    <div class="req">${r.card.image ? `<img src="/static/cards/${esc(r.card.image)}" alt="">` : ""}
+      <div class="grow">${r.kind === "rebirth" ? `<b>Rebirth x${esc(r.amount)}</b>`
         : r.kind === "lookup" ? `<b>Who owns ${esc(r.card.artist)}</b> (${esc(r.card.rarity)}${r.card.find ? " #" + esc(r.card.find) : ""})`
         : r.kind === "join" ? `<b>Join ${esc(r.card.name)}'s server</b> (#${esc(r.card.serial)} ${esc(r.card.artist)})`
         : `<b>${r.kind === "buy" ? "Buy now" : "Bid " + esc(r.amount)}</b> on #${esc(r.card.serial)} from ${esc(r.card.seller || "?")}`}

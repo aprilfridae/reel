@@ -75,6 +75,15 @@ def active_bids(market, requests, now):
                        "seller": r.get("card", {}).get("seller")} for r in found]}
 
 
+@app.get("/api/logo")
+def logo():
+    """The header logo: web/static/logo.svg / .gif / .webp / .png, whichever is there first."""
+    for name in ("logo.svg", "logo.gif", "logo.webp", "logo.png"):
+        if os.path.exists(os.path.join(APP, "web", "static", name)):
+            return jsonify(file=name)
+    return jsonify(file=None)
+
+
 @app.get("/api/state")
 def state():
     market = webstate.load("market.json", {"cards": [], "scanned_at": None})
