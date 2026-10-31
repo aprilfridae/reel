@@ -30,6 +30,24 @@ def _has_stop_button(reg, scale):
     return cv2.minMaxLoc(cv2.matchTemplate(gray, t, cv2.TM_CCOEFF_NORMED))[1] > 0.8
 
 
+TRACK_ROWS = (332, 282)  # the track's top and bottom edge, in UI pixels above the window's bottom
+BUTTON_ROWS = (258, 205)  # the big blue "HOLD E TO REEL" button's rows, the same way
+
+
+def _has_reel_button(img, scale):
+    """Is the big blue HOLD E TO REEL button showing? It's only there while reeling, so it
+    tells a real reel bar from the "Waiting for a bite" / "It got away" panels."""
+    h, w = img.shape[:2]
+    y0, y1 = int(h - BUTTON_ROWS[0] * scale), int(h - BUTTON_ROWS[1] * scale)
+    x0, x1 = int(w / 2 - 200 * scale), int(w / 2 + 200 * scale)
+    reg = img[max(0, y0):y1, max(0, x0):x1]
+    if reg.size == 0:
+        return False
+    hsv = cv2.cvtColor(reg, cv2.COLOR_BGR2HSV)
+    blue = (hsv[..., 0] >= 95) & (hsv[..., 0] <= 115) & (hsv[..., 1] > 110) & (hsv[..., 2] > 170)
+    return float(blue.mean()) > 0.3
+
+
 def detect(img, scale=1.0):
     """scale = Roblox UI scale (1.0 on the PCs seen so far; see Game.ui_scale).
     Returns dict with:
@@ -46,12 +64,17 @@ def detect(img, scale=1.0):
     x1 = int(w / 2 + PANEL_HALF_WIDTH * scale)
     raw = img[y0:y1, x0:x1]
     busy = _has_stop_button(raw, scale)
-    reg = raw.astype(np.int16)
-    b, g, r = reg[..., 0], reg[..., 1], reg[..., 2]
-
     out = {"busy": busy, "zone": None, "fish": None, "scale": scale}
     if not busy:
         return out  # the reel bar always comes with the red Stop button
+    if not _has_reel_button(img, scale):
+        return out  # "Waiting for a bite" / "It got away": the Stop button but no reel bar
+    # Only the track's own rows are looked at, not the whole panel region: in events like
+    # Acid Rain the world is full of bright green streaks that look just like the zone.
+    t0 = max(0, int(h - TRACK_ROWS[0] * scale) - y0)
+    t1 = max(t0 + 1, int(h - TRACK_ROWS[1] * scale) - y0)
+    reg = raw[t0:t1].astype(np.int16)
+    b, g, r = reg[..., 0], reg[..., 1], reg[..., 2]
 
     green = (g > r + 40) & (g > b + 30) & (g > 110)
     row_hits = green.sum(1)
@@ -84,7 +107,14 @@ def detect(img, scale=1.0):
     cols = np.where((green[band].sum(0) > 0.3 * height) & inside)[0]
     if len(cols) < 20 * scale:
         return out
-    out["zone"] = (int(cols.min()), int(cols.max()))
+    # The zone is one wide block (the fish icon can split it in two, so pieces within a
+    # fish's width of each other are one block); thin green streaks elsewhere in the
+    # track aren't part of it: take the widest block
+    groups = np.split(cols, np.where(np.diff(cols) > 50 * scale)[0] + 1)
+    block = max(groups, key=lambda grp: int(grp.max() - grp.min()))
+    if block.max() - block.min() < 20 * scale:
+        return out
+    out["zone"] = (int(block.min()), int(block.max()))
 
     # The fish is whatever bright, non-green, non-white thing sits in the track.
     # Not keyed to blue, since rarer fish may use other colors.

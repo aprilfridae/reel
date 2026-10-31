@@ -40,6 +40,7 @@ from game import HERE, TEMPLATES, Game, StopBot, WindowLost, find_roblox
 from packs import Packs, close_any_menu, close_popup, teleport_to_fishing
 
 FULL_CHECK_EVERY = 60  # seconds; backup Packs-menu check during an event
+EVENT_DEBOUNCE = 8  # seconds a new banner reading must hold before an event start / end is believed
 METEOR_STOP_FISHING = 20  # seconds before a meteor event: don't start new casts
 METEOR_TELEPORT = 4  # seconds before it: teleport to Spawn (the teleport takes ~2.5s)
 CFG = load_config()
@@ -119,6 +120,7 @@ def main():
 
     cw = {"checked": 0.0, "value": False}
     dc = {"checked": 0.0}  # when "Disconnected" was last looked for
+    ev = {"val": "?", "since": 0.0}  # an event banner reading that differs from the current event, and since when
 
     def chat_waiting():
         """A message typed on the website, waiting to be sent in game (looked at most
@@ -354,7 +356,17 @@ def main():
             coins.update(img)
         rolled_during_reel = events.read_deferred()
         events.update_banner(img)
-        pack = events.pack
+        raw_pack = events.pack
+        if raw_pack == state["pack"]:
+            ev["val"] = "?"
+            pack = raw_pack
+        else:
+            # A change of event is only believed once the banner has said so for a few
+            # seconds: with a strong tint (Acid Rain) it read "started / over" every second
+            # or two, and each "over" opens packs and sweeps the Index
+            if ev["val"] != raw_pack:
+                ev["val"], ev["since"] = raw_pack, time.time()
+            pack = raw_pack if time.time() - ev["since"] >= EVENT_DEBOUNCE else state["pack"]
         if pack != state["pack"]:
             if state["pack"]:
                 log(f"{state['pack'].replace('_', ' ')} event over")
