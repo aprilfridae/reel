@@ -98,15 +98,20 @@ def _match_digit(badge, s):
     g = _glyph(badge)
     if g is None:
         return None
-    best, best_score = None, 0.0
+    best, best_score, second = None, 0.0, 0.0
     for n, t in _GLYPHS.items():
         if n == "1":
             continue  # #1 is recognized by its rainbow badge
         tt = cv2.resize(t, (g.shape[1], g.shape[0]), interpolation=cv2.INTER_NEAREST)
         score = (np.logical_and(tt > 0, g > 0).sum() / max(1, np.logical_or(tt > 0, g > 0).sum()))
         if score > best_score:
-            best, best_score = n, score
-    if best_score >= 0.6:
+            best, best_score, second = n, score, best_score
+        elif score > second:
+            second = score
+    # The badge font is a fixed pixel font, so a real #2 / #3 matches its template at
+    # about 0.87 (and the other digit at 0.65-0.7). A #5 or #8 only resembles a 2 or 3
+    # roughly (0.6-0.75): it has to be a clear match, clearly ahead of the other digit
+    if best_score >= 0.78 and best_score - second >= 0.1:
         return best
     os.makedirs(os.path.join(HERE, "serial_glyphs"), exist_ok=True)
     cv2.imwrite(os.path.join(HERE, "serial_glyphs", f"{int(time.time() * 1000)}.png"), g)
