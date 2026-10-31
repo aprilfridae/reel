@@ -246,6 +246,16 @@ class Packs:
     def menu_is_open(self, img):
         return self.game.find("packs_header", img) is not None
 
+    def _wait_menu(self, want_open, timeout=2.0):
+        """Wait only as long as the Packs menu takes to appear / go: True when it's as wanted."""
+        g = self.game
+        end = time.time() + timeout
+        while time.time() < end:
+            if self.menu_is_open(g.frame()) == want_open:
+                return True
+            g.wait(0.04)
+        return self.menu_is_open(g.frame()) == want_open
+
     def open_menu(self):
         g = self.game
         close_popup(g)
@@ -263,7 +273,11 @@ class Packs:
             hit = g.find("packs_button", img)
             if hit:
                 g.click(hit[0], hit[1])
-            g.wait(1.0)
+                g.park_mouse()
+                if self._wait_menu(True):
+                    return True
+            else:
+                g.wait(1.0)
         print("Couldn't open the Packs menu.")
         return False
 
@@ -276,17 +290,23 @@ class Packs:
             hit = g.find("close_menu", img)
             if hit:
                 g.click(hit[0], hit[1])
-            g.wait(0.6)
+                g.park_mouse()
+            if self._wait_menu(False, 1.2):
+                return
 
     def _menu_center(self, img):
         h, w = img.shape[:2]
         return w // 2, h // 2
 
-    def _find_buttons(self, img):
+    def _find_buttons(self, img, bottom=False):
         """(continue, open_another) centers or None. Open Another's text shrinks to fit
-        its count, so it's found as the orange button to the right of Continue."""
+        its count, so it's found as the orange button to the right of Continue.
+        bottom=True searches only the lower part of the screen, where the buttons always
+        are: about a third of the picture, so several times quicker."""
         g = self.game
-        cont = g.find("continue_pair", img) or g.find("continue_button", img)
+        h, w = img.shape[:2]
+        region = (0, int(h * 0.6), w, h) if bottom else None
+        cont = g.find("continue_pair", img, region=region) or g.find("continue_button", img, region=region)
         if not cont:
             return None, None
         s = self._scale(img)
@@ -306,8 +326,8 @@ class Packs:
         g = self.game
         img = g.frame()
         cx, cy = self._menu_center(img)
-        g.scroll(cx, cy, 15)  # back to the top
-        g.wait(0.4)
+        g.scroll(cx, cy, 15, check=False)  # back to the top (the menu is open: no need to check it each time)
+        g.wait(0.25)
         for _ in range(6):
             img = g.frame()
             s = self._scale(img)
@@ -322,21 +342,24 @@ class Packs:
                 if y < img.shape[0] * 0.65:
                     return None  # tile fully in view and greyed out: none to open
                 # Name near the bottom edge: its button may be cut off; scroll on
-            g.scroll(cx, cy, -3)
-            g.wait(0.4)
+            g.scroll(cx, cy, -3, check=False)
+            g.wait(0.25)
         return None
 
-    def open_pack(self, pack, should_stop=lambda: False):
-        """Open every pack of this kind (or until should_stop). Leaves the menu closed.
+    def open_pack(self, pack, should_stop=lambda: False, keep_menu=False):
+        """Open every pack of this kind (or until should_stop). Leaves the menu closed
+        (keep_menu=True leaves it open, for opening several kinds in a row).
         Returns how many times it opened."""
         if not self.open_menu():
             return 0
         btn = self.find_open_button(pack)
         if not btn:
-            self.close_menu()
+            if not keep_menu:
+                self.close_menu()
             return 0
         count = self._open_from(btn, pack, should_stop)
-        self.close_menu()
+        if not keep_menu:
+            self.close_menu()
         return count
 
     def _open_button_under(self, img, pack):
@@ -385,6 +408,41 @@ class Packs:
         print(f"Pulled {kinds} card(s)" + (" with a #1 badge!" if badge else "")
               + f" - saved reveals/{shot}", flush=True)
 
+    def _wait_buttons(self, timeout=20):
+        """Wait for the reveal to finish and its buttons to show: (continue, open_another,
+        picture). Looked at about every 30 ms, so the next click is made the moment they
+        appear (the reveal itself takes about 2.7s and can't be skipped)."""
+        g = self.game
+        end = time.time() + timeout
+        img = None
+        while time.time() < end:
+            img = g.frame()
+            cont, another = self._find_buttons(img, bottom=True)
+            if another:
+                return cont, another, img
+            if cont:
+                # Open Another can show up a moment after Continue; look again
+                until = time.time() + 0.8
+                while time.time() < until and not another:
+                    g.wait(0.03)
+                    img = g.frame()
+                    cont2, another = self._find_buttons(img, bottom=True)
+                    cont = cont2 or cont
+                return cont, another, img
+            g.wait(0.03)
+        return None, None, img
+
+    def _wait_buttons_gone(self, timeout=1.5):
+        """After a click: until the old reveal's buttons are off the screen (so they aren't
+        mistaken for the next reveal's), instead of a fixed pause."""
+        g = self.game
+        end = time.time() + timeout
+        while time.time() < end:
+            cont, _ = self._find_buttons(g.frame(), bottom=True)
+            if not cont:
+                return
+            g.wait(0.03)
+
     def _open_from(self, btn, pack, should_stop):
         """Click a pack's OPEN button, then Open Another until none are left."""
         g = self.game
@@ -393,25 +451,8 @@ class Packs:
         g.park_mouse()
         count = 1
         while True:
-            # Wait for the reveal to finish and the buttons to show up
-            end = time.time() + 20
-            another = cont = None
-            img = None
-            while time.time() < end:
-                img = g.frame()
-                cont, another = self._find_buttons(img)
-                if another:
-                    break
-                if cont:
-                    # Open Another can show up a moment after Continue; look again
-                    g.wait(0.8)
-                    img = g.frame()
-                    cont2, another = self._find_buttons(img)
-                    cont = cont2 or cont
-                    break
-                g.wait(0.2)
-            if (cont or another) and pack in EVENT_PACKS:
-                self._record_reveal(img, pack)
+            cont, another, img = self._wait_buttons()
+            record = (cont or another) and pack in EVENT_PACKS
             if another and count >= MAX_OPENS_PER_VISIT:
                 # During an event auto-roll keeps adding packs while the reveal is up,
                 # so "Open Another" never runs out. Take a break; the rest get opened
@@ -422,8 +463,12 @@ class Packs:
                 g.click(*another)
                 g.park_mouse()  # a hovered button changes color
                 count += 1
-                g.wait(0.5)  # let the old buttons disappear
+                if record:  # (looking at the reveal just finished is done while the next one plays)
+                    self._record_reveal(img, pack)
+                self._wait_buttons_gone()
                 continue
+            if record:
+                self._record_reveal(img, pack)
             if cont:
                 g.click(*cont)
                 g.wait(0.8)
@@ -435,16 +480,21 @@ class Packs:
 
     def open_session(self, should_stop, log=print):
         """Open every pack in SESSION_PACKS until none are left.
-        Returns True when all are done, False if should_stop() cut it short."""
-        for pack in SESSION_PACKS:
-            while True:
-                if should_stop():
-                    return False
-                n = self.open_pack(pack, should_stop)
-                if not n:
-                    break
-                log(f"Opened {pack.replace('_', ' ')} x{n}")
-        return True
+        Returns True when all are done, False if should_stop() cut it short. The Packs menu
+        stays open from one kind of pack to the next (it was closed and opened again for
+        each, about 3 seconds apiece)."""
+        try:
+            for pack in SESSION_PACKS:
+                while True:
+                    if should_stop():
+                        return False
+                    n = self.open_pack(pack, should_stop, keep_menu=True)
+                    if not n:
+                        break
+                    log(f"Opened {pack.replace('_', ' ')} x{n}")
+            return True
+        finally:
+            self.close_menu()
 
     def open_by_priority(self, should_stop):
         for pack in PRIORITY:
