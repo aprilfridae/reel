@@ -42,6 +42,19 @@ class TradeFlow:
         self.window_seen_at = None  # when the current window was first seen (for the one-off sort + read)
         self.cmds_at = 0.0
         self.cmds_waiting = False
+        # whatever trade.json says is from before this start (a trade open when the bot stopped or updated):
+        # nothing is open until it's seen again, or the website would show that trade for good
+        self._closed_state()
+
+    def _closed_state(self):
+        self._save(open=None, incoming=None, mine=[], theirs=[], wanted=[], wanted_count=0, search=None, offer=None)
+
+    def _window_closed(self):
+        self.window_seen_at = None
+        self._offer_sig = None
+        self._closed_state()
+        self.log("Trade window closed")
+        chat.restore_window(self.game)
 
     # ---------- noticing ----------
 
@@ -56,6 +69,8 @@ class TradeFlow:
         popup = None if name else trade.incoming(self.game, img)
         changed = name != self.open or bool(popup) != bool(self.popup)
         self.open, self.popup = name, popup
+        if not name and self.window_seen_at is not None:
+            self._window_closed()  # (closed while fishing: the next window must be read afresh)
         if changed:  # (a request popup can stay up for ages: it's only recorded, fishing carries on)
             self._save(open=name, incoming=popup and {"name": popup["name"], "at": time.strftime("%H:%M:%S")})
         return bool(name) or self.has_cmds()
@@ -153,11 +168,7 @@ class TradeFlow:
             except Exception as e:  # reading is a convenience: the window stays usable
                 self.log(f"(couldn't read the trade window: {type(e).__name__}: {e})")
         elif not name and self.window_seen_at is not None:
-            self.window_seen_at = None
-            self._save(open=None, mine=[], theirs=[], wanted=[], wanted_count=0, search=None, offer=None)
-            self._offer_sig = None
-            self.log("Trade window closed")
-            chat.restore_window(g)
+            self._window_closed()
         if name and time.time() - self.snap_at > SNAP_EVERY:
             self.snapshot()
             try:

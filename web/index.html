@@ -698,7 +698,8 @@ function renderWho(s) {
   const lk = s.lookup || {}, reqs = s.requests || [];
   const latest = reqs.filter(r => r.kind === "lookup" || r.kind === "join").slice(-1)[0];
   const busy = latest && (latest.status === "waiting" || latest.status === "working");
-  $("who-status").textContent = latest ? `${latest.kind === "join" ? "Join" : "Look-up"}: ${latest.status}${latest.result ? " - " + latest.result : ""}` : "";
+  // (once the results are cleared, an old look-up's "done" line goes with them)
+  $("who-status").textContent = latest && (busy || lk.at) ? `${latest.kind === "join" ? "Join" : "Look-up"}: ${latest.status}${latest.result ? " - " + latest.result : ""}` : "";
   $("who-at").textContent = lk.at ? `${lk.artist} · ${lk.rarity}${lk.exist ? " · " + lk.exist + " exist" : ""} · read ${lk.at}` : "";
   const rows = lk.rows || [];
   setHtml($("who-rows"), rows.length ? rows.map((r, i) => `<div class="owner">
@@ -1303,6 +1304,13 @@ $("who-form").addEventListener("submit", async (e) => {
   const artist = $("who-artist").value.trim();
   if (!artist) return;
   await post("/api/lookup", {artist, rarity: $("who-rarity").value, find: $("who-find").value.trim()});
+  refresh();
+});
+// emptying the artist box clears the results (here at once, and on the bot's PC for every other page)
+$("who-artist").addEventListener("input", async () => {
+  if ($("who-artist").value.trim() || !(window.whoLookup || {}).at) return;
+  if (window.lastState) renderWho({...window.lastState, lookup: {}});
+  await post("/api/lookup/clear");
   refresh();
 });
 

@@ -108,6 +108,11 @@ def brand(name):
 def state():
     market = webstate.load("market.json", {"cards": [], "scanned_at": None})
     now = time.time()
+    trade = {**webstate.load("trade.json", {}), "cmds": webstate.load("trade_cmd.json", [])[-8:]}
+    if trade.get("open") and now - float(trade.get("ts") or 0) > 120:
+        # an open trade window is saved every couple of seconds (its picture): this one is left over (the bot
+        # stopped, or the game closed under it), so it isn't shown as open
+        trade.update(open=None, offer=None, stale=True)
     market["cards"] = [c for c in market.get("cards", [])  # drop auctions that have ended
                        if not c.get("ends_ts") or c["ends_ts"] > now]
     return jsonify({
@@ -126,7 +131,7 @@ def state():
         "lookup": webstate.load("lookup.json", {}),
         "bid_anyway": bid_anyway(),
         "bids_seen": webstate.load("bids_seen.json", {}),
-        "trade": {**webstate.load("trade.json", {}), "cmds": webstate.load("trade_cmd.json", [])[-8:]},
+        "trade": trade,
         "packlog": {"log": webstate.load("packlog.json", [])[-80:], "roll": webstate.load("packroll.json", {})},
         "outbid": webstate.load("outbid.json", [])[-20:],
         "fishing": {**webstate.load("fishcal.json", {}), "settings": webstate.load("fishing.json", {})},
@@ -218,6 +223,13 @@ def ask_lookup():
     if find and not find.isdigit():
         return jsonify(error="the serial to find must be a number"), 400
     return jsonify(_market_request("lookup", {"artist": artist, "rarity": rarity, "find": find}))
+
+
+@app.post("/api/lookup/clear")
+def clear_lookup():
+    """The who-owns search box was emptied: forget the last results."""
+    webstate.save("lookup.json", {})
+    return jsonify(ok=True)
 
 
 @app.post("/api/join")

@@ -510,6 +510,7 @@ def main():
 
     # one-time jobs from the website don't survive a restart (a stuck one would come back forever)
     webstate.update("mode.json", {}, lambda m: {**m, "once": []})
+    webstate.save("lookup.json", {})  # nor do the last who-owns results (owners and servers change)
 
     # restarted after tonight's packs were opened but before its rebirths were done?
     try:
