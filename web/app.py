@@ -124,6 +124,7 @@ def state():
         "bid_anyway": bid_anyway(),
         "bids_seen": webstate.load("bids_seen.json", {}),
         "trade": {**webstate.load("trade.json", {}), "cmds": webstate.load("trade_cmd.json", [])[-8:]},
+        "packlog": {"log": webstate.load("packlog.json", [])[-80:], "roll": webstate.load("packroll.json", {})},
         "now": time.time(),  # so the page's countdowns use this PC's clock
     })
 

@@ -387,6 +387,26 @@ class Packs:
                 h, w = img.shape[:2]
                 cv2.imwrite(path, img[int(h * 0.9):, int(w * 0.8):])
 
+    _logger = None
+
+    def _log_reveal(self, img, pack, n):
+        """Note this reveal on the website's pack log, with any #1 badge on it (looked for in the background)."""
+        if Packs._logger is None:
+            from concurrent.futures import ThreadPoolExecutor
+            Packs._logger = ThreadPoolExecutor(max_workers=1)
+        Packs._logger.submit(self._log_reveal_now, img.copy(), pack, n)
+
+    @staticmethod
+    def _log_reveal_now(img, pack, n):
+        try:
+            import packlog
+            ones = len(number_one_hits(img))
+            packlog.record_open(pack, n, img, ones)
+            if ones:
+                print(f"Pack reveal: {ones} #1 card(s) in a {pack.replace('_', ' ')} pack", flush=True)
+        except Exception as e:
+            print(f"(couldn't log a pack reveal: {type(e).__name__}: {e})", flush=True)
+
     _recorder = None
 
     def _record_reveal(self, img, pack):
@@ -473,6 +493,8 @@ class Packs:
         while True:
             cont, another, img = self._wait_buttons()
             record = (cont or another) and pack in EVENT_PACKS
+            if cont or another:
+                self._log_reveal(img, pack, count)
             if another and count >= MAX_OPENS_PER_VISIT:
                 # During an event auto-roll keeps adding packs while the reveal is up,
                 # so "Open Another" never runs out. Take a break; the rest get opened

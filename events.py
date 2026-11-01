@@ -142,11 +142,19 @@ class EventWatcher:
             return None
         return self._read_label(area)
 
+    on_label = None  # called with (pack key, whole label text) each time the label is read: the website's roll count
+
     def _read_label(self, area):
-        m = re.search(r"last\W+(.+?)\s+Pack", read_text(area), re.I)
+        text = read_text(area)
+        m = re.search(r"last\W+(.+?)\s+Pack", text, re.I)
         if not m:
             return None
         key = pack_key(m.group(1))
+        if self.on_label:
+            try:
+                self.on_label(key, text)
+            except Exception:
+                pass
         changed = key != self.last_pack
         self.last_pack = key
         return key if changed else None

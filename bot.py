@@ -32,6 +32,7 @@ import launcher
 import market
 import market_scan
 import mybids
+import packlog
 import whoowns
 import rebirth
 import trade_flow
@@ -96,6 +97,7 @@ def main():
     events = EventWatcher(game)
     chores = gifts.Chores(game, log=log)
     tflow = trade_flow.TradeFlow(game, log=log)
+    events.on_label = packlog.roll_seen  # (the auto-roll label feeds the website's roll counts)
     log("Bot started. Press F8 (or create stop.flag) to stop.")
 
     req = {"checked": 0.0, "any": False}
