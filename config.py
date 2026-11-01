@@ -18,6 +18,7 @@ DEFAULTS = {
     # The website (market list, bids, rebirth button, chat), reachable from your home network
     "fullscreen": True,          # keep Roblox in F11 fullscreen (the same screen layout on every PC)
     "send_diagnostics": True,    # send reel_log.csv + a reel screenshot to the developer after the first reels
+    "chat_ignore_names": [],     # more accounts whose chat lines the website leaves out (april fridae and cable always are)
     "auto_update": True,         # check GitHub for a newer release and replace this .exe with it
     "website": True,
     "website_port": 8080,

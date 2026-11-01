@@ -50,7 +50,8 @@ def _split(line):
 _CLEAN = re.compile(r"^[A-Za-z0-9 .,!?'\"&:;()\-*/+@#$%_<>=~\[\]|]+$")
 # The game's own rotating announcements (they repeat all the time and aren't chat)
 _ANNOUNCEMENT = ("favorite", "favourite", "submit", "leaderboard", "booth", "new updates", "enjoying the game",
-                 "pulled the", "ultra]", "secret]", "in 100,000")  # (the last ones: rare-pull broadcasts)
+                 "pulled the", "ultra]", "secret]", "in 100,000",  # (rare-pull broadcasts)
+                 "joined the experience", "left the experience", "your friend")  # (Roblox's join / leave notices)
 
 
 _HINT = re.compile(r"\s*To chat\s*click here.*$", re.I)
@@ -164,6 +165,39 @@ def _junky(text):
     return bad > 0 or letters < 2 or (len(text) >= 6 and letters / len(text) < 0.55)
 
 
+# Accounts whose lines are never read back off the screen: the bot's own (the website already has those messages)
+# and a friend's who runs this bot too. More can be added with "chat_ignore_names" in config.json.
+SELF_NAMES = ["april fridae", "cable"]
+SELF_FILE = "chat_self.json"  # names learned to be the bot's own (its sent messages came back under them)
+
+
+def _self_names():
+    try:
+        import config
+        extra = [n for n in config.load().get("chat_ignore_names", []) if isinstance(n, str)]
+    except Exception:
+        extra = []
+    return SELF_NAMES + extra + [n for n in webstate.load(SELF_FILE, []) if isinstance(n, str)]
+
+
+def is_self(who, names=None):
+    """Is this (OCR-read, maybe garbled) name the bot's own account? Loosely: any part of the name, or a close
+    match ("üpril friC;ue" is still april fridae)."""
+    low = re.sub(r"[^a-z0-9 ]", "", (who or "").lower()).strip()
+    if not low:
+        return False
+    for name in names or _self_names():
+        n = name.lower()
+        parts = [p for p in n.split() if len(p) >= 4]
+        if any(p in low or (len(low) >= 4 and low in p) for p in parts):
+            return True
+        if any(SequenceMatcher(None, w, p).ratio() >= 0.75 for w in low.split() for p in parts):
+            return True
+        if SequenceMatcher(None, low, n).ratio() >= 0.6:
+            return True
+    return False
+
+
 CHAT_ICON = (138, 34)  # the speech-bubble button in the top-left corner, at UI scale 1
 _hidden_by_us = False
 
@@ -231,6 +265,24 @@ class Chat:
     def due(self):
         return time.time() - self.last_read > self.every
 
+    _on_checked = 0.0
+
+    def _ensure_on(self, img):
+        """Chat has to be switched on for anything to be read. It can be left off (the bot switches it off for the
+        Card Market, and a restart in the middle of a market trip forgets to switch it back), so if the chat button
+        shows it off, click it on: looked at every 20 s at most."""
+        if _hidden_by_us or time.time() - self._on_checked < 20:
+            return
+        self._on_checked = time.time()
+        try:
+            if not chat_enabled(self.game, img):
+                s = self.game.ui_scale(img)
+                self.game.click(CHAT_ICON[0] * s, CHAT_ICON[1] * s)
+                self.game.park_mouse()
+                print("Chat was switched off: switched it back on", flush=True)
+        except Exception:
+            pass
+
     def read(self, img):
         """OCR the chat box and store the messages not stored yet.
 
@@ -238,9 +290,10 @@ class Chat:
         the scenery is skipped and picked up on a later look (every message stays on
         screen for a while, and the picture behind it keeps moving)."""
         self.last_read = time.time()
+        self._ensure_on(img)
         h, w = img.shape[:2]
         box = img[int(CHAT_BOX[1] * h):int(CHAT_BOX[3] * h), int(CHAT_BOX[0] * w):int(CHAT_BOX[2] * w)]
-        deep = time.time() - self.last_deep > 4.0
+        deep = time.time() - self.last_deep > 2.0  # (the filtered extra reads, at most every 2 s: they catch lines the plain read garbles)
         if deep:
             self.last_deep = time.time()
         entries = _messages(box, deep)
@@ -251,12 +304,24 @@ class Chat:
         at = time.strftime("%H:%M:%S")
         same = lambda a, b: SequenceMatcher(None, a, b).ratio() > 0.72
 
+        selves = _self_names()
+        learned = []
+
         def add(stored):
             # What's on screen is the last several messages, so compare with the last
             # stored ones (loosely: OCR reads the same line a little differently each time)
-            roster = {e["who"] for e in stored[-200:] if e.get("who") and e["who"] != "You"}
+            roster = {e["who"] for e in stored[-200:] if e.get("who") and e["who"] != "You" and not is_self(e["who"], selves)}
             recent = [f"{e['who']}: {e['text']}" for e in stored[-60:]]
             for who, text in entries:
+                # the bot's own account: never read back. Its messages are on the website from the moment
+                # they were typed there, so a read of them would only show them twice
+                if is_self(who, selves):
+                    continue
+                if any(len(s) >= 4 and SequenceMatcher(None, s.lower(), text.lower()).ratio() > 0.8 for s in self.sent):
+                    # one of ours under a name not known yet: remember the name, skip the line
+                    if _NAME.match(who) and who not in learned:
+                        learned.append(who)
+                    continue
                 who = _snap_name(who, roster)
                 if not who or _junky(text) or len(text) < 2:
                     continue
@@ -285,20 +350,12 @@ class Chat:
                     continue  # the reads disagree too much: wait for a better one
                 self.seen.remove(cand)
                 text = best
-                # A message sent from the website is already listed (it was added the
-                # moment it was typed); the screen showing it just fills in the name
-                echo = next((e for e in reversed(stored[-15:]) if e.get("pending_echo") and text
-                             and e["text"].lower() in text.lower()), None)
-                if echo:
-                    echo["who"] = who or echo["who"]
-                    echo.pop("pending_echo")
-                    recent.append(f"{echo['who']}: {echo['text']}")
-                    continue
-                mine = any(text and s.lower() in text.lower() for s in self.sent)
-                stored.append({"at": at, "who": who, "text": text, "mine": mine})
+                stored.append({"at": at, "who": who, "text": text, "mine": False})
                 recent.append(f"{who}: {text}")
             return stored[-KEEP:]
         webstate.update("chat.json", [], add)
+        if learned:
+            webstate.update(SELF_FILE, [], lambda names: (names + [n for n in learned if n not in names])[-10:])
 
     def pending(self):
         return bool(webstate.load("outbox.json", []))
@@ -318,7 +375,4 @@ class Chat:
             log(f"Sent chat: {msg['text']}")
             sent_ids = {msg["id"]}
             webstate.update("outbox.json", [], lambda o: [m for m in o if m["id"] not in sent_ids])
-            # show it on the website right away; the next read of the screen fills in the name
-            entry = {"at": time.strftime("%H:%M:%S"), "who": "You", "text": msg["text"],
-                     "mine": True, "pending_echo": True}
-            webstate.update("chat.json", [], lambda c, e=entry: (c + [e])[-KEEP:])
+            # (it is already on the website: the website adds it to the chat the moment it's typed there)

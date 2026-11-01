@@ -332,6 +332,9 @@ def send_chat():
         return jsonify(error="too long (200 max)"), 400
     msg = {"id": uuid.uuid4().hex[:8], "text": text, "asked_at": time.strftime("%H:%M:%S")}
     webstate.update("outbox.json", [], lambda o: o + [msg])
+    # shown in the chat straight away, as yours (the bot never reads its own account's lines back off the screen)
+    entry = {"at": msg["asked_at"], "who": "You", "text": text, "mine": True, "id": msg["id"]}
+    webstate.update("chat.json", [], lambda c: (c + [entry])[-500:])
     return jsonify(msg)
 
 
