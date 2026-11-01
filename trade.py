@@ -341,9 +341,12 @@ def read_wanted_header(game, img):
     if not crop.size:
         return 0
     for scale in (3, 2, 4):
-        m = re.search(r"want\s*(\d+)", read_text(crop, scale=scale), re.I)
+        # a 1 is often read as l or I, stuck to the word: "they wantl of your cards"
+        m = re.search(r"want\s*([\dIl|O]+)\s*of", read_text(crop, scale=scale), re.I)
         if m:
-            return int(m.group(1))
+            digits = m.group(1).translate(str.maketrans("Il|O", "1110"))
+            if digits.isdigit():
+                return int(digits)
     return 0
 
 

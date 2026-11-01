@@ -20,6 +20,7 @@ SNAPSHOT = os.path.join(APP, "web", "static", "trade.jpg")
 SNAP_EVERY = 2.0  # seconds between live pictures while a trade window is open
 POLL_EVERY = 1.5  # seconds between looks for a window / request popup while fishing
 LIST_LIMIT = 40  # cards read from each list (the website shows the 20 lowest serials)
+WANTS_EVERY = 3.0  # seconds between looks at "they want N of your cards" while a trade window is open
 
 
 def _serial_key(c):
@@ -42,6 +43,7 @@ class TradeFlow:
         self.window_seen_at = None  # when the current window was first seen (for the one-off sort + read)
         self.cmds_at = 0.0
         self.cmds_waiting = False
+        self.wanted_n, self.wants_seen, self.wants_at = 0, (0, 0), 0.0  # how many of my cards they want
         # whatever trade.json says is from before this start (a trade open when the bot stopped or updated):
         # nothing is open until it's seen again, or the website would show that trade for good
         self._closed_state()
@@ -51,6 +53,7 @@ class TradeFlow:
 
     def _window_closed(self):
         self.window_seen_at = None
+        self.wanted_n, self.wants_seen = 0, (0, 0)
         self._offer_sig = None
         self._closed_state()
         self.log("Trade window closed")
@@ -136,7 +139,29 @@ class TradeFlow:
         trade.show_tab(g, "mine")
         self._save(open=self.open, mine=mine, theirs=theirs, wanted_count=wanted_n,
                    wanted=[c for c in mine if c.get("wanted")], scanned_at=time.strftime("%H:%M:%S"), sort="serial")
+        self.wanted_n, self.wants_seen = wanted_n, (wanted_n, 0)
         self.log(f"Trade window: read {len(mine)} of my cards ({wanted_n} wanted) and {len(theirs)} of theirs")
+
+    def check_wants(self):
+        """The other player can ask for more of my cards (or take requests back) at any time: "Your cards" says
+        how many they want, so that line is watched, and my cards are read again when it changes (the cards
+        they want are listed first, so the order changes too). A new number must read the same twice."""
+        if time.time() - self.wants_at < WANTS_EVERY:
+            return
+        self.wants_at = time.time()
+        n = trade.read_wanted_header(self.game, self.game.frame())
+        if n == self.wanted_n:
+            self.wants_seen = (n, 0)
+            return
+        self.wants_seen = (n, self.wants_seen[1] + 1 if self.wants_seen[0] == n else 1)
+        if self.wants_seen[1] < 2:
+            return
+        self.log(f"Trade: {self.open} now wants {n} of my cards")
+        trade.show_tab(self.game, "mine")
+        mine = trade.read_cards(self.game, min(LIST_LIMIT, 20 + n), self.log)
+        self.wanted_n = n
+        self._save(mine=mine, wanted_count=n, wanted=[c for c in mine if c.get("wanted")],
+                   scanned_at=time.strftime("%H:%M:%S"))
 
     def search(self, tab, query):
         g = self.game
@@ -175,6 +200,11 @@ class TradeFlow:
                 self.read_offers()
             except Exception as e:
                 self.log(f"(couldn't read the offers: {type(e).__name__}: {e})")
+        if name and self.window_seen_at is not None:
+            try:
+                self.check_wants()
+            except Exception as e:
+                self.log(f"(couldn't read what they want: {type(e).__name__}: {e})")
         for c in [c for c in webstate.load("trade_cmd.json", []) if c.get("status") == "waiting"]:
             try:
                 ok, msg = self.run(c)
