@@ -15,6 +15,8 @@ import re
 import time
 from datetime import datetime
 
+import tz
+
 import webstate
 from balance import read_balance
 from game import HERE
@@ -289,14 +291,14 @@ def _save(state):
 
 def nightly_wanted():
     """Has tonight's rebirth round not been finished yet?"""
-    return _load().get("done_date") != datetime.now().date().isoformat()
+    return _load().get("done_date") != tz.now().date().isoformat()
 
 
 def run_nightly(game, fraction=FRACTION, should_stop=lambda: False, dry_run=False, log=print):
     """Spend `fraction` of the coins on hand (worked out once per night and remembered,
     so a pause for a bid doesn't start over with a smaller or bigger budget) on rebirths.
     Returns True when finished for the night."""
-    today = datetime.now().date().isoformat()
+    today = tz.now().date().isoformat()
     state = _load()
     if state.get("date") != today:
         close_popup(game)

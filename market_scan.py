@@ -676,7 +676,9 @@ def scan(game, read_bidders=True, max_pages=60, log=print, should_stop=lambda: F
                         int(cx - CARD_HALF_W * s):int(cx + CARD_HALF_W * s)]
             card["image"] = f"card_{len(found):03d}.jpg"
             os.makedirs(CARDS_DIR, exist_ok=True)
-            cv2.imwrite(os.path.join(CARDS_DIR, card["image"]), thumb)
+            # (twice the size, so it stays sharp when the website shows it enlarged)
+            cv2.imwrite(os.path.join(CARDS_DIR, card["image"]), cv2.resize(thumb, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC),
+                        [cv2.IMWRITE_JPEG_QUALITY, 88])
             # The bid window is only opened when it has something the listing can't give: who
             # the top bidder is (a listing with a bid on it), or a start price whose unit
             # couldn't be read. A listing with no bids just has "Start <price>" and no bidder

@@ -203,6 +203,13 @@
   .stats-note b { color: var(--fg); font-weight: 600; }
   .panel > h3 { font: 700 16px/1.2 var(--f-title); letter-spacing: .02em; margin-bottom: 12px; }
   .bid-row, .sell-row { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-top: var(--hair); }
+  .zoomable { cursor: zoom-in; }
+  .lightbox { position: fixed; inset: 0; z-index: 60; display: none; place-items: center; background: rgba(9, 9, 8, .86); padding: 24px; }
+  .lightbox.on { display: grid; }
+  .lightbox figure { display: grid; gap: 12px; justify-items: center; max-width: min(92vw, 560px); max-height: 94vh; cursor: zoom-out; }
+  .lightbox img { max-width: 100%; max-height: 78vh; object-fit: contain; border: var(--hair); border-radius: var(--r); background: var(--bg); }
+  .lightbox figcaption { text-align: center; font-size: 13px; overflow-wrap: anywhere; }
+  .lightbox .raw { display: block; margin-top: 6px; color: var(--dim); font: 500 11px/1.4 var(--f-mono); }
   .bid-row .thumb, .sell-row .thumb { width: 40px; height: 40px; flex: none; border: var(--hair); border-radius: 4px; background: var(--bg); object-fit: cover; }
   .cname { font-size: 12px; color: var(--dim); overflow-wrap: anywhere; }
   .bid-row .mid, .sell-row .mid { flex: 1; min-width: 0; display: grid; gap: 2px; }
@@ -387,6 +394,7 @@
   <div class="side-foot"><span class="dot" id="side-dot"></span><span id="side-status">connecting…</span></div>
 </aside>
 <div class="scrim" id="scrim"></div>
+<div class="lightbox" id="lightbox" role="dialog" aria-label="enlarged card"><figure><img id="lb-img" alt=""><figcaption id="lb-cap"></figcaption></figure></div>
 
 <div class="main">
   <header class="top">
@@ -532,7 +540,9 @@ let cards = [];  // live listings; index i is what data-bid/data-buy/#amt<i> ref
 function cardHtml(c, i) {
   const price = c.top_bid || c.current_bid || c.start || "?";
   return `<article class="mcard">
-    <div class="mart">${c.image ? `<img src="/static/cards/${esc(c.image)}?t=${esc(c.seen_at)}" alt="">` : ""}
+    <div class="mart">${c.image ? `<img class="zoomable" src="/static/cards/${esc(c.image)}?t=${esc(c.seen_at)}" alt="" title="click to enlarge"
+        data-full="/static/cards/${esc(c.image)}?t=${esc(c.seen_at)}"
+        data-cap="${esc([c.name || "", "#" + (c.serial || "?"), c.seller ? "seller " + c.seller : "", price].filter(Boolean).join(" · "))}">` : ""}
       <span class="serial ${c.serial === "1" ? "one" : ""}">#${esc(c.serial)}</span></div>
     <div class="mbody">
       <div class="mends"><span class="eyebrow">ends in</span>${c.ends_ts
@@ -555,7 +565,7 @@ function renderMarket(s) {
   const m = s.market || {};
   const nowSecs = Date.now() / 1000 + clockOffset;
   cards = (m.cards || []).filter(c => !c.ends_ts || c.ends_ts > nowSecs);  // drop ended auctions
-  $("market-at").textContent = m.scanned_at ? `last checked ${m.scanned_at}` : "not checked yet";
+  $("market-at").textContent = m.scanned_ts ? `last checked ${localTime(m.scanned_ts)} your time` : m.scanned_at ? `last checked ${m.scanned_at}` : "not checked yet";
   const focused = document.activeElement && document.activeElement.id.startsWith("amt") ? document.activeElement.id : null;
   const typed = {}; document.querySelectorAll("[id^=amt]").forEach(e => typed[e.id] = e.value);
   if (setHtml($("market-body"), cards.length ? `<div class="mgrid">${cards.map(cardHtml).join("")}</div>` : `<div class="empty">no #1–#3 listings found yet.</div>`)) {
@@ -568,7 +578,9 @@ function mineRowHtml(m, at) {
   const sr = `<span class="sr ${one ? "one" : ""}">${m.serial ? "#" + esc(m.serial) : "card"}</span>`;
   const left = m.ends_ts ? `<b class="countdown" data-mine-ends="${esc(m.ends_ts)}">${esc(m.time_left)}</b>`
     : `<span class="done">${esc(m.time_left || "?")}</span>`;
-  const thumb = m.image ? `<img class="thumb" src="/static/mine/${esc(m.image)}?t=${esc(at)}" alt="">` : `<span class="thumb"></span>`;
+  const cap = [m.name || "", m.serial ? "#" + m.serial : "", m.status || "", m.amount || "", m.time_left || ""].filter(Boolean).join(" · ");
+  const thumb = m.image ? `<img class="thumb zoomable" src="/static/mine/${esc(m.image)}?t=${esc(at)}" alt="" title="click to enlarge"
+      data-full="/static/mine/${esc(m.image)}?t=${esc(at)}" data-cap="${esc(cap)}" data-raw="${esc(m.raw || "")}">` : `<span class="thumb"></span>`;
   const nm = m.name ? `<span class="cname">${esc(m.name)}</span>` : "";
   if (m.kind !== "bid") return `<div class="sell-row">
     ${thumb}
@@ -579,11 +591,23 @@ function mineRowHtml(m, at) {
     <div class="mid">${sr}${nm}<span class="eyebrow">${m.status === "outbid" ? "outbid at" : "your bid"}</span><b>${esc(m.amount)}</b></div>
     <div class="rt">${m.status ? `<span class="pill ${esc(m.status)}">${esc(m.status)}</span>` : ""}${left}</div></div>`;
 }
+// click a card picture to see it enlarged (with what the bot read off it, in case the reading was wrong); click or Esc closes
+document.addEventListener("click", (e) => {
+  const z = e.target.closest(".zoomable");
+  if (z) {
+    $("lb-img").src = z.dataset.full;
+    $("lb-cap").innerHTML = `${esc(z.dataset.cap || "")}${z.dataset.raw ? `<span class="raw">read as: ${esc(z.dataset.raw)}</span>` : ""}`;
+    $("lightbox").classList.add("on");
+  } else if (e.target.closest("#lightbox")) {
+    $("lightbox").classList.remove("on");
+  }
+});
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") $("lightbox").classList.remove("on"); });
 function renderActivity(s) {
   const mb = s.mybids || {}, items = mb.items || [], at = mb.at || "";
   const bids = items.filter(i => i.kind === "bid"), mine = items.filter(i => i.kind !== "bid");
   $("nav-activity-count").textContent = items.length ? String(items.length) : "";
-  $("activity-at").textContent = at ? `read from the market at ${at}` : "not read yet";
+  $("activity-at").textContent = mb.ts ? `read from the market at ${localTime(mb.ts)} your time` : at ? `read from the market at ${at}` : "not read yet";
   const stat = (ic, n, label) => `<div class="stat"><span class="ico">${icon(ic)}</span><div><b>${esc(n)}</b><span class="eyebrow">${label}</span></div></div>`;
   const stats = mb.at === undefined
     ? `the bot reads this at each market check (hourly, or press "check market now").`
@@ -787,6 +811,12 @@ $("controls-body").innerHTML = `<div class="modes" role="radiogroup" aria-label=
     <label class="range" id="fs-lead-row"><span>aim-ahead: <b id="fs-lead-val">0.40 s</b></span>
       <input type="range" id="fs-lead" min="0.1" max="1.5" step="0.05" value="0.4"></label>
     <div class="eyebrow" id="fs-note"></div>
+  </div>
+  <div class="eyebrow" style="margin-top:16px">schedule timezone</div>
+  <div class="fishset">
+    <label class="range"><span>the nightly pack session (1:00-6:00 am) and the daily rebirth run on this clock</span>
+      <select id="tz-zone"></select></label>
+    <div class="eyebrow" id="tz-note"></div>
   </div>`;
 $("controls-body").insertAdjacentHTML("beforeend", "");
 let fsBusy = 0;  // while a slider is being dragged the page doesn't overwrite it
@@ -811,8 +841,33 @@ function renderFishing(s) {
   $("fs-note").textContent = f.lead == null ? "not measured yet: it fits the bar's delay from the first reels of each run"
     : `measured bar delay ${f.lag == null ? "?" : Math.round(f.lag * 1000) + " ms"} · fitted aim-ahead ${(+f.fitted).toFixed(2)} s · in use ${(+f.lead).toFixed(2)} s (from the next reel)`;
 }
+const ZONES = [["auto", "this PC's own clock (auto)"], ["America/Los_Angeles", "Pacific (Los Angeles)"], ["America/Denver", "Mountain (Denver)"],
+  ["America/Phoenix", "Arizona"], ["America/Chicago", "Central (Chicago, Louisiana)"], ["America/New_York", "Eastern (New York)"],
+  ["America/Anchorage", "Alaska"], ["Pacific/Honolulu", "Hawaii"], ["America/Toronto", "Toronto"], ["America/Mexico_City", "Mexico City"],
+  ["America/Sao_Paulo", "Brazil"], ["UTC", "UTC"], ["Europe/London", "London"], ["Europe/Paris", "Paris, Berlin"], ["Europe/Moscow", "Moscow"],
+  ["Asia/Dubai", "Dubai"], ["Asia/Kolkata", "India"], ["Asia/Singapore", "Singapore"], ["Asia/Tokyo", "Tokyo"], ["Australia/Sydney", "Sydney"],
+  ["Pacific/Auckland", "Auckland"]];
+$("tz-zone").innerHTML = ZONES.map(([v, n]) => `<option value="${v}">${n}</option>`).join("");
+$("tz-zone").addEventListener("change", async (e) => {
+  tzBusy = Date.now() + 2000;
+  try { await fetch("/api/tz", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({zone: e.target.value})}); } catch {}
+  refresh();
+});
+let tzBusy = 0;
+const localTime = (ts) => new Date(ts * 1000).toLocaleTimeString([], {hour: "numeric", minute: "2-digit"}).toLowerCase();
+const hhmm12 = (mins) => { const m = ((mins % 1440) + 1440) % 1440, h = Math.floor(m / 60), mm = String(m % 60).padStart(2, "0"); return `${h % 12 || 12}:${mm} ${h < 12 ? "am" : "pm"}`; };
+function renderTz(s) {
+  const t = s.tz || {};
+  if (!t.abbr) return;
+  if (Date.now() > tzBusy && !ZONES.some(([v]) => v === $("tz-zone").value && v === t.zone)) $("tz-zone").value = ZONES.some(([v]) => v === t.zone) ? t.zone : "auto";
+  const mine = -new Date().getTimezoneOffset(), diff = mine - t.offset;
+  const ex = diff === 0 ? "the same as your clock" : `6:00 pm on the bot's clock is ${hhmm12(18 * 60 + diff)} for you`;
+  const label = (off) => "UTC" + (off >= 0 ? "+" : "−") + Math.floor(Math.abs(off) / 60) + (Math.abs(off) % 60 ? ":" + String(Math.abs(off) % 60).padStart(2, "0") : "");
+  $("tz-note").textContent = `bot's schedule clock: ${t.clock} ${t.abbr} (${label(t.offset)})${t.zone === "auto" ? "" : " · this PC is on " + t.pc_abbr + " (" + label(t.pc_offset) + ")"} · ${ex}`;
+}
 function renderControls(s) {
   try { renderFishing(s); } catch (e) { console.error(e); }
+  try { renderTz(s); } catch (e) { console.error(e); }
   const mode = (s.mode && s.mode.mode) || "auto", queued = [].concat((s.mode && s.mode.once) || []);
   document.querySelectorAll("#controls [data-mode]").forEach(b => {
     b.classList.toggle("on", b.dataset.mode === mode);

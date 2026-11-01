@@ -70,6 +70,11 @@ def read_listings(game):
             break
         game.wait(1.0)
     if not m:
+        try:  # what was on screen, so a failure can be looked at
+            cv2.imwrite(os.path.join(HERE, "mybids_fail.png"), img)
+            print(f"My Listings header read as: {_header(words, h, s)!r} (window {img.shape[1]}x{img.shape[0]})", flush=True)
+        except Exception:
+            pass
         return None
     winning = _num(m.group(1))
     sell = re.search(r"Selling\W*([\dIlOo|]+)\s*/", _header(words, h, s), re.I)
@@ -123,6 +128,24 @@ def _tiles(game, img, words):
     for a in found:
         if not any(abs(a[0] - b[0]) < 80 * s and 0 < a[1] - b[1] < 60 * s for b in amounts):
             amounts.append(a)
+    # The amount found may be the "Buy now 10.0T" line under the bid when the bid's own amount wasn't read (the 🔨 before it
+    # confuses the reader): that line is ~20 px below the bid, so move up to the bid's row (the amount is then read
+    # from there if possible, else "?": the website shows the picture to read it from)
+    fixed = []
+    for ax, ay, atext in amounts:
+        if any(t.lower().startswith(("buy", "now")) and abs(y - ay) < 9 * s and 0 < ax - x < 150 * s for t, x, y in words):
+            ay2 = ay - 20 * s
+            own = next((fix_numbers(t) for t, x, y in words if abs(y - ay2) < 10 * s and abs(x - ax) < 70 * s
+                        and re.fullmatch(r"[\d.,]+[KMBTQ]", fix_numbers(t))), None)
+            if own is None:  # read just that line, right of the hammer icon, bigger
+                strip = img[max(0, int(ay2 - 13 * s)):int(ay2 + 13 * s), max(0, int(ax - 40 * s)):int(ax + 75 * s)]
+                from ocr import read_text
+                m = re.search(r"[\d.,]+\s*[KMBTQ]", fix_numbers(read_text(strip, scale=4))) if strip.size else None
+                own = m.group(0).replace(" ", "") if m else None
+            fixed.append((ax, ay2, own or "?"))
+        else:
+            fixed.append((ax, ay, atext))
+    amounts = fixed
     amounts.sort(key=lambda a: (round(a[1] / 40), a[0]))
     items = []
     for ax, ay, atext in amounts:
@@ -146,9 +169,12 @@ def _tiles(game, img, words):
         left = time_text(" ".join(t for t, x, y in near if ay + 20 * s < y < ay + 70 * s))
         secs = left_seconds(left)
         fname = f"m_{len(items):02d}.jpg"
-        crop = img[max(0, int(bid_y - 393 * s)):int(bid_y - 146 * s), max(0, int(cx - 91 * s)):int(cx + 91 * s)]
+        # the whole tile from the card's top to its "You're winning!" line (card, amount, time left), twice the size,
+        # so the website can show it enlarged when the reading of it was wrong
+        crop = img[max(0, int(top - 6 * s)):min(h, int(ay + 100 * s)), max(0, int(cx - 112 * s)):int(cx + 112 * s)]  # (a little wider than the tile: its centre can be off by a few px)
         if crop.size:
-            cv2.imwrite(os.path.join(MINE_DIR, fname), crop)
+            cv2.imwrite(os.path.join(MINE_DIR, fname),
+                        cv2.resize(crop, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC), [cv2.IMWRITE_JPEG_QUALITY, 90])
         items.append({"kind": kind, "status": status, "name": name, "serial": serial, "amount": atext,
                       "time_left": left, "ends_ts": time.time() + secs if secs is not None else None,
                       "image": fname if crop.size else None, "raw": raw[:160]})

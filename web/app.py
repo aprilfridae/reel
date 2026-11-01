@@ -14,6 +14,7 @@ from flask import Flask, jsonify, request, send_from_directory
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config  # noqa: E402
+import tz  # noqa: E402
 import webstate  # noqa: E402
 from paths import APP, RES  # noqa: E402
 
@@ -126,6 +127,7 @@ def state():
         "trade": {**webstate.load("trade.json", {}), "cmds": webstate.load("trade_cmd.json", [])[-8:]},
         "packlog": {"log": webstate.load("packlog.json", [])[-80:], "roll": webstate.load("packroll.json", {})},
         "fishing": {**webstate.load("fishcal.json", {}), "settings": webstate.load("fishing.json", {})},
+        "tz": tz.info(),
         "now": time.time(),  # so the page's countdowns use this PC's clock
     })
 
@@ -273,6 +275,20 @@ def set_fishing():
         return jsonify(error="those must be numbers"), 400
     webstate.update("fishing.json", {}, lambda s: {**s, **change})
     return jsonify(ok=True, **change)
+
+
+@app.post("/api/tz")
+def set_tz():
+    """The schedule's timezone: "auto" (the PC's own) or an IANA name like America/Chicago."""
+    zone = str(request.get_json(force=True).get("zone", "auto")).strip()
+    if zone != "auto":
+        try:
+            from zoneinfo import ZoneInfo
+            ZoneInfo(zone)
+        except Exception:
+            return jsonify(error="unknown timezone"), 400
+    webstate.save("tz.json", {"zone": zone})
+    return jsonify(ok=True, **tz.info())
 
 
 @app.post("/api/rebirth")

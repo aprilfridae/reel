@@ -36,6 +36,7 @@ import packlog
 import whoowns
 import rebirth
 import trade_flow
+import tz
 import updater
 import webstate
 from config import load as load_config
@@ -464,7 +465,7 @@ def main():
 
     def session_due():
         """The nightly pack session starts between 1:00 and 6:00, once a day."""
-        now = datetime.now()
+        now = tz.now()  # (the schedule's zone: the PC's own, or the one picked on the website)
         if not auto() or not CFG["nightly_session"] or not PACK_SESSION_START <= now.hour < PACK_SESSION_LATEST:
             return False
         try:
@@ -484,11 +485,11 @@ def main():
             raise
         if done:
             with open(SESSION_STATE, "w") as f:
-                f.write(datetime.now().date().isoformat())
+                f.write(tz.now().date().isoformat())
             log("Pack session finished: all of those packs are open")
             if manual:
                 done_once("packs")
-            in_window = PACK_SESSION_START <= datetime.now().hour < PACK_SESSION_LATEST
+            in_window = PACK_SESSION_START <= tz.now().hour < PACK_SESSION_LATEST
             rb["wanted"] = auto() and in_window and CFG["nightly_rebirth"] and rebirth.nightly_wanted()
         else:
             log("Pack session paused (bid/buy/chat); it picks up again right after")
@@ -498,11 +499,11 @@ def main():
 
     # restarted after tonight's packs were opened but before its rebirths were done?
     try:
-        packs_done_today = open(SESSION_STATE).read().strip() == datetime.now().date().isoformat()
+        packs_done_today = open(SESSION_STATE).read().strip() == tz.now().date().isoformat()
     except OSError:
         packs_done_today = False
     rb["wanted"] = (CFG["nightly_rebirth"] and packs_done_today and rebirth.nightly_wanted()
-                    and datetime.now().hour < PACK_SESSION_LATEST)
+                    and tz.now().hour < PACK_SESSION_LATEST)
 
     def one_round():
         if updater.pending():
