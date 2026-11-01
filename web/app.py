@@ -18,6 +18,7 @@ import config  # noqa: E402
 import tz  # noqa: E402
 import webstate  # noqa: E402
 from paths import APP, RES  # noqa: E402
+from version import VERSION  # noqa: E402
 
 # the page is bundled in the .exe; the card pictures are saved next to it as they're found
 app = Flask(__name__, static_folder=os.path.join(APP, "web", "static"))
@@ -131,6 +132,7 @@ def state():
         "fishing": {**webstate.load("fishcal.json", {}), "settings": webstate.load("fishing.json", {})},
         "tz": tz.info(),
         "now": time.time(),  # so the page's countdowns use this PC's clock
+        "version": VERSION,  # an open page reloads itself when this changes (an update brought a new page)
     })
 
 

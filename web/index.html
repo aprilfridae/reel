@@ -221,6 +221,12 @@
   .outbid b { display: block; color: #ef4444; font: 800 15px/1.2 var(--f-body); }
   .outbid .ob-line { font-size: 13px; overflow-wrap: anywhere; }
   .outbid .ob-at { color: var(--dim); font: 500 11px/1.4 var(--f-mono); }
+  /* an incoming trade request, wherever on the page you are: same box, white instead of red */
+  .outbid.treq { border-color: var(--fg); box-shadow: var(--glow); grid-template-columns: 1fr auto auto auto; }
+  .outbid.treq b { color: var(--fg); }
+  .outbid.treq button:not(.ob-x) { height: 34px; padding: 0 14px; }
+  .outbid.treq .ob-x { background: var(--line); }
+  @media (max-width: 520px) { .outbid.treq { grid-template-columns: 1fr 1fr auto; } .outbid.treq > div { grid-column: 1 / -1; } }
   .outbid .ob-x { width: 26px; height: 26px; border-radius: 50%; border: 0; background: #ef4444; color: #fff;
     font: 700 14px/1 var(--f-body); cursor: pointer; padding: 0; }
   @keyframes ob-in { from { opacity: 0; transform: translateY(-8px); } }
@@ -382,7 +388,7 @@
     button.mode.on:not(:disabled):hover { border-color: var(--fg); box-shadow: var(--glow-soft); }
   }
   #mode-note { font-size: 12px; color: var(--dim); margin: 12px 0 20px; min-height: 18px; }
-  .once { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
+  .once { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-top: 12px; }
 
   /* rebirth banner */
   #rebirth .sec-head .eyebrow, #rebirth .sec-head h2 { display: none; }
@@ -467,7 +473,7 @@
   <div class="side-foot"><span class="dot" id="side-dot"></span><span id="side-status">connecting…</span></div>
 </aside>
 <div class="scrim" id="scrim"></div>
-<div class="outbids" id="outbids" aria-live="assertive"></div>
+<div class="outbids" aria-live="assertive"><div id="tradepop"></div><div id="outbids" style="display:contents"></div></div>
 <div class="lightbox" id="lightbox" role="dialog" aria-label="enlarged card"><figure><img id="lb-img" alt=""><figcaption id="lb-cap"></figcaption></figure></div>
 
 <div class="main">
@@ -481,9 +487,7 @@
       <div class="bal" title="Coins you have right now (coins held in your active bids aren't included)">
         <span class="tile" id="coin-tile"></span>
         <div><b id="balance">…</b><span id="balance-at"></span></div>
-      </div>
-      <button id="scan"><span class="lbl">Check market now</span></button>
-    </div>
+      </div>    </div>
   </header>
 
   <main>
@@ -567,7 +571,6 @@ document.querySelectorAll("nav a[data-icon]").forEach(a => a.insertAdjacentHTML(
 $("menu-btn").innerHTML = icon("menu");
 $("menu-close").innerHTML = icon("close");
 $("coin-tile").innerHTML = icon("coin");
-$("scan").insertAdjacentHTML("afterbegin", icon("refresh"));
 
 // the logo: web/static/logo.svg, .gif, .webp or .png (the first that exists), spinning unless it's a gif
 (async function findLogo() {
@@ -970,7 +973,7 @@ $("controls-body").innerHTML = `<div class="modes" role="radiogroup" aria-label=
     `<button class="mode" data-mode="${k}" role="radio" aria-checked="false">${icon(ic)}<span class="mtxt"><b>${name}</b><span>${desc}</span></span><span class="radio"></span></button>`).join("")}</div>
   <div id="mode-note"></div>
   <div class="eyebrow">one-time actions</div>
-  <div class="once"><button data-do="packs">${icon("box")}<span>open packs now</span></button><button data-do="index">${icon("crown")}<span>record #1s now</span></button></div>
+  <div class="once"><button data-do="packs">${icon("box")}<span>open packs now</span></button><button data-do="index">${icon("crown")}<span>record #1s now</span></button><button data-scan>${icon("refresh")}<span class="lbl">check market now</span></button></div>
   <details class="adv" id="adv"><summary>advanced settings</summary>
   <div class="eyebrow" style="margin-top:12px">ping compensation (fishing)</div>
   <div class="fishset">
@@ -1189,6 +1192,27 @@ function tick() {
 setInterval(tick, 1000);
 
 // the game's "YOU WERE OUTBID!" notices: shown until dismissed (remembered in this browser), a day at most
+// an incoming trade request pops up at the top of every part of the page (until answered, gone, or dismissed)
+let treqDismissed = "";
+function renderTradePop(s) {
+  const t = s.trade || {}, inc = t.incoming;
+  const waiting = (t.cmds || []).some(c => c.status === "waiting" && (c.cmd === "accept" || c.cmd === "decline"));
+  const key = inc ? `${inc.name}|${inc.at}` : "";
+  const show = inc && !t.open && key !== treqDismissed;
+  setHtml($("tradepop"), show ? `<div class="outbid treq" role="alertdialog" aria-label="trade request">
+      <div><b>⇄ ${esc(inc.name)} wants to trade</b><div class="ob-at">${waiting ? "answering in game…" : `since ${esc(inc.at || "")}`}</div></div>
+      <button data-treq="decline" ${waiting ? "disabled" : ""}>decline</button>
+      <button class="solid" data-treq="accept" ${waiting ? "disabled" : ""}>accept</button>
+      <button class="ob-x" data-treq="hide" aria-label="hide">×</button></div>` : "");
+}
+$("tradepop").addEventListener("click", ev => {
+  const b = ev.target.closest("button[data-treq]");
+  if (!b || b.disabled) return;
+  const inc = (tradeData || {}).incoming;
+  if (b.dataset.treq === "hide") { treqDismissed = inc ? `${inc.name}|${inc.at}` : ""; $("tradepop").innerHTML = ""; return; }
+  tradeCmd({cmd: b.dataset.treq});  // (accept opens the trade room in the trade section)
+  if (b.dataset.treq === "accept") $("trade").scrollIntoView({behavior: "smooth"});
+});
 const OB_KEY = "outbid-dismissed";
 function obDismissed() { try { return Number(localStorage.getItem(OB_KEY)) || 0; } catch { return 0; } }
 function renderOutbid(s) {
@@ -1225,6 +1249,7 @@ function setLive(live, short) {
   $("side-status").textContent = short;
 }
 
+let pageVersion = "";
 async function refresh() {
   let s;
   try { s = await (await fetch("/api/state")).json(); }
@@ -1234,6 +1259,12 @@ async function refresh() {
     return;
   }
   if (s.now) clockOffset = s.now - Date.now() / 1000;
+  // the bot was updated since this page was opened: load the new page (not while something is being typed)
+  if (s.version) {
+    pageVersion = pageVersion || s.version;
+    const typing = document.activeElement && /^(INPUT|TEXTAREA)$/.test(document.activeElement.tagName) && document.activeElement.value;
+    if (s.version !== pageVersion && !typing) { location.reload(); return; }
+  }
   const st = s.status || {};
   $("status").textContent = st.text ? `bot: ${st.text}` : "bot status unknown";
   $("status").title = st.at || "";
@@ -1245,7 +1276,7 @@ async function refresh() {
   const live = ((s.market || {}).cards || []).filter(c => !c.ends_ts || c.ends_ts > nowSecs).length;
   $("nav-market-count").textContent = live ? String(live) : "";
   // one section failing to draw must not stop the others
-  for (const draw of [renderMarket, renderActivity, renderOnes, renderPacks, renderTrade, renderWho, renderControls, renderRebirth, renderLog, renderOutbid]) {
+  for (const draw of [renderMarket, renderActivity, renderOnes, renderPacks, renderTrade, renderWho, renderControls, renderRebirth, renderLog, renderOutbid, renderTradePop]) {
     try { draw(s); } catch (err) { console.error(err); }
   }
   try { renderChat(s.chat || [], s.outbox || []); } catch (err) { console.error(err); }
@@ -1301,10 +1332,10 @@ async function onClick(e) {
     document.body.classList.toggle("nav-open");
   } else if (t.id === "menu-close" || t.id === "scrim") {
     closeNav();
-  } else if (t.id === "scan") {
+  } else if (t.hasAttribute("data-scan")) {  // "check market now" in bot controls
     await post("/api/scan");
-    const lbl = t.querySelector(".lbl");
-    lbl.textContent = "Asked — the bot will check soon"; setTimeout(() => lbl.textContent = "Check market now", 4000);
+    const lbl = t.querySelector(".lbl"), was = lbl.textContent;
+    lbl.textContent = "Asked — the bot will check soon"; setTimeout(() => lbl.textContent = was, 4000);
   }
 }
 document.addEventListener("click", onClick);

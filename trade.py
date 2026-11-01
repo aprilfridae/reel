@@ -63,22 +63,32 @@ def window_open(game, img):
 
 
 def incoming(game, img):
-    """A pending request popup: {"name", "accept": (x, y), "decline": (x, y)} or None."""
+    """A pending request popup: {"name", "accept": (x, y), "decline": (x, y)} or None. The title line alone
+    counts (a menu can cover the buttons, and their green/red text doesn't always read); the buttons then sit
+    where they always are: 55 px under the title, 105 px either side of the screen's centre (at scale 1)."""
     words = _words(game, img, POPUP)
     text = " ".join(w[0] for w in words)
     if not re.search(r"wants?\s*to\s*trade", text, re.I):
         return None
     acc = [(x, y) for t, x, y in words if t.lower().startswith("accept")]
     dec = [(x, y) for t, x, y in words if t.lower().startswith("decline")]
-    name = re.split(r"\s*wants?\s*to\s*trade", text, flags=re.I)[0].split()[-1] if text.split() else "?"
-    if not acc or not dec:
-        return None
-    return {"name": name, "accept": acc[0], "decline": dec[0]}
+    before = re.split(r"\s*wants?\s*to\s*trade", text, flags=re.I)[0].split()
+    name = "_".join(before[-2:]) if len(before) >= 2 and len(before[-1]) <= 4 else (before[-1] if before else "?")  # "ka bel" = ka_bel
+    title_y = next((y for t, x, y in words if t.lower().startswith("want")), None)
+    s, cx = _scale(game, img), img.shape[1] / 2
+    return {"name": name, "covered": not (acc and dec),
+            "accept": acc[0] if acc else (cx - 105 * s, title_y + 55 * s),
+            "decline": dec[0] if dec else (cx + 105 * s, title_y + 55 * s)}
 
 
 def respond(game, accept, log=print):
     """Press Accept or Decline on the request popup. False if there isn't one."""
     req = incoming(game, game.frame())
+    if req and req["covered"]:  # a menu is in front of the buttons: close it first
+        from packs import close_any_menu
+        close_any_menu(game)
+        game.wait(0.5)
+        req = incoming(game, game.frame())
     if not req:
         log("No trade request on screen")
         return False
