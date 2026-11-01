@@ -41,7 +41,7 @@ REF_HEIGHT = 1369  # window height the templates were cut at
 
 VK_F8 = 0x77
 MENU_CLOSE_BUTTONS = ("close_menu", "close_market", "close_daily", "close_gifts")
-SCANCODES = {"e": 0x12, "w": 0x11, "a": 0x1E, "s": 0x1F, "d": 0x20, "space": 0x39}
+SCANCODES = {"e": 0x12, "w": 0x11, "a": 0x1E, "s": 0x1F, "d": 0x20, "space": 0x39, "f11": 0x57}
 
 
 class StopBot(Exception):
@@ -69,6 +69,25 @@ def find_roblox():
     # Prefer the normal Roblox player (class WINDOWSCLIENT) over e.g. the Store app's frame
     found.sort(key=lambda hwnd: window_class(hwnd) != "WINDOWSCLIENT")
     return found[0] if found else None
+
+
+class MONITORINFO(ctypes.Structure):
+    _fields_ = [("cbSize", wt.DWORD), ("rcMonitor", wt.RECT), ("rcWork", wt.RECT), ("dwFlags", wt.DWORD)]
+
+
+user32.MonitorFromWindow.restype = wt.HANDLE
+user32.MonitorFromWindow.argtypes = [wt.HWND, wt.DWORD]
+user32.GetMonitorInfoW.argtypes = [wt.HANDLE, ctypes.POINTER(MONITORINFO)]
+
+
+def window_is_fullscreen(hwnd):
+    """True when the window covers its whole monitor (Roblox's F11 fullscreen), taskbar and all."""
+    r = wt.RECT()
+    user32.GetWindowRect(hwnd, ctypes.byref(r))
+    mon = MONITORINFO(ctypes.sizeof(MONITORINFO))
+    user32.GetMonitorInfoW(user32.MonitorFromWindow(hwnd, 2), ctypes.byref(mon))  # 2: nearest monitor
+    m = mon.rcMonitor
+    return (r.left, r.top, r.right, r.bottom) == (m.left, m.top, m.right, m.bottom)
 
 
 class BITMAPINFOHEADER(ctypes.Structure):
@@ -266,6 +285,24 @@ class Game:
         self.held = set()
         self.wake_display()
         return True
+
+    def ensure_fullscreen(self, log=print):
+        """Put Roblox in F11 fullscreen, so the window is the whole screen on every PC (no title
+        bar, no taskbar strip). Roblox remembers the setting, so this usually finds it done.
+        Returns True when the window fills the screen."""
+        if window_is_fullscreen(self.hwnd):
+            return True
+        for _ in range(2):
+            self.focus()
+            self.tap("f11", 0.06)
+            end = time.time() + 4
+            while time.time() < end:
+                self.wait(0.25)
+                if window_is_fullscreen(self.hwnd):
+                    log("Roblox is now fullscreen (F11)")
+                    return True
+        log("Couldn't put Roblox in fullscreen")
+        return False
 
     cleaning = False  # set while tidying the screen on the way out: a stop request is already being obeyed
 

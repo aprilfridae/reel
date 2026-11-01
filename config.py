@@ -16,6 +16,7 @@ DEFAULTS = {
     "place_id": 78972201022064,  # Underground Artist RNG
     "server_id": "",             # optional: a server (job id) to join instead of any server
     # The website (market list, bids, rebirth button, chat), reachable from your home network
+    "fullscreen": True,          # keep Roblox in F11 fullscreen (the same screen layout on every PC)
     "auto_update": True,         # check GitHub for a newer release and replace this .exe with it
     "website": True,
     "website_port": 8080,

@@ -1,3 +1,3 @@
 """The version of this build. Bump it for every release: the .exe compares it with the newest
 GitHub release tag (v1.2.3 -> 1.2.3) to decide whether to update itself."""
-VERSION = "1.1.4"
+VERSION = "1.1.5"

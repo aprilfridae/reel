@@ -38,7 +38,7 @@ import webstate
 from config import load as load_config
 from events import EventWatcher
 from fisher import DEFAULT_LEAD, Fisher
-from game import HERE, TEMPLATES, Game, StopBot, WindowLost, find_roblox
+from game import HERE, TEMPLATES, Game, StopBot, WindowLost, find_roblox, window_is_fullscreen
 from packs import Packs, close_any_menu, close_popup, teleport_to_fishing
 
 FULL_CHECK_EVERY = 60  # seconds; backup Packs-menu check during an event
@@ -79,6 +79,8 @@ def main():
     game = Game()
     if not was_open:
         launcher.wait_in_game(game, log=log)
+    if CFG["fullscreen"]:
+        game.ensure_fullscreen(log)
     fisher = Fisher(game, args.lead, log_path=args.log_reels)
     packs = Packs(game)
     events = EventWatcher(game)
@@ -123,6 +125,7 @@ def main():
 
     cw = {"checked": 0.0, "value": False}
     dc = {"checked": 0.0}  # when "Disconnected" was last looked for
+    fs = {"checked": 0.0, "tries": 0}  # when fullscreen was last checked, and failed re-entries in a row
     ev = {"val": "?", "since": 0.0}  # an event banner reading that differs from the current event, and since when
 
     def chat_waiting():
@@ -490,6 +493,13 @@ def main():
             dc["checked"] = time.time()
             if launcher.is_disconnected(game):
                 raise WindowLost()
+        if CFG["fullscreen"] and time.time() - fs["checked"] > 60:
+            fs["checked"] = time.time()  # left fullscreen (someone pressed F11)? go back, a few tries at most
+            if not window_is_fullscreen(game.hwnd) and fs["tries"] < 3:
+                fs["tries"] += 1
+                game.ensure_fullscreen(log)
+            elif window_is_fullscreen(game.hwnd):
+                fs["tries"] = 0
         if chat_waiting():
             send_chat()
             return

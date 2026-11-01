@@ -144,4 +144,6 @@ def recover(game, cfg, log=print):
     if not game.reattach():
         return False
     wait_in_game(game, log=log)
+    if cfg.get("fullscreen"):
+        game.ensure_fullscreen(log)
     return True
