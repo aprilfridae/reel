@@ -121,8 +121,10 @@ def _match_digit(badge, s):
 def time_text(text):
     """'e 1h 13m left' / 'lh 03m lef' -> '1h 13m' (hours, minutes, seconds as shown),
     or None if the text has no time in it."""
-    text = fix_numbers(text or "")
-    text = re.sub(r"(?<![A-Za-z0-9])[Il|](?=\s*h\b)", "1", text)  # 'lh' is '1h'
+    # the clock icon before the time is read as I or |: 'Ilh 01m' is '⏱ 1h 01m' (left alone, the hours were lost)
+    text = re.sub(r"(?<![A-Za-z0-9])[I|]([Il|\d]{1,2})(?=\s*h\b)", r"\1", text or "")
+    text = fix_numbers(text)
+    text = re.sub(r"(?<![A-Za-z0-9])[Il|]{1,2}(?=\s*h\b)", lambda m: "1" * len(m.group(0)), text)  # 'lh' is '1h'
     parts = re.findall(r"(\d+)\s*([hms])\b", text)
     if not parts:
         return None
@@ -287,8 +289,8 @@ def wait_for_listings(game, timeout=10):
 
 def set_sort_lowest_serial(game):
     """Open the Sort dropdown and pick 'Lowest serial' (checked by reading it back)."""
-    # OCR often reads "Lowest" as "Louest", so it's matched loosely: "Lo..st serial"
-    lowest = re.compile(r"^lo[wuv]+est$", re.I)
+    # "Lowest" is read as Louest, Leuest...; "serial" is the only option with that word, so the option is found by it
+    serial = re.compile(r"^seri[a-z]{0,2}$", re.I)
     wait_for_listings(game)
     for _ in range(3):
         words = read_words(game.frame(), scale=2)
@@ -298,17 +300,18 @@ def set_sort_lowest_serial(game):
         i, sx, sy = sort[0]
         # The label right after "Sort:" on the same line
         after = [t for t, x, y in words[i + 1:i + 3] if abs(y - sy) < 12]
-        if len(after) == 2 and lowest.match(after[0]) and after[1].lower() == "serial":
+        if after and serial.match(after[-1]):
             return True
         game.click(sx, sy)
         game.wait(0.8)
         words = read_words(game.frame(), scale=3)
-        opt = [(x, y) for j, (t, x, y) in enumerate(words)
-               if t.lower() == "serial" and j and lowest.match(words[j - 1][0]) and y > sy + 20]
+        opt = [(x - 25, y) for t, x, y in words if serial.match(t) and y > sy + 20 and abs(x - sx) < 250]
         if opt:
             game.click(*opt[0])
-            game.park_mouse()
-            game.wait(1.5)
+        else:
+            game.click(sx, sy)  # option not read: close the dropdown and look again
+        game.park_mouse()
+        game.wait(1.5)
     return False
 
 
