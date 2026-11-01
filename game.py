@@ -151,13 +151,27 @@ class WindowCapture:
         self._pending = None
         return pending["frame"]
 
+    def _set_stream_region(self, region):
+        """Point the stream at (left, top, right, bottom) in screen pixels, or the whole screen (None). A strip
+        costs the PC far less to copy than the whole screen; switching takes ~20 ms."""
+        want = tuple(region) if region else (0, 0, self.cam.width, self.cam.height)
+        if getattr(self, "_stream_region", (0, 0, self.cam.width, self.cam.height)) == want:
+            return
+        self.cam.stop()
+        self._pending = None  # a helper still waiting on the old stream is abandoned
+        self.cam.start(region=want, target_fps=144, video_mode=True)
+        self._stream_region = want
+
     def _grab_stream(self, w, h):
+        self._set_stream_region(None)
         frame = self._stream_frame(1.0)
         if frame is None:
             return None
         pt = wt.POINT(0, 0)
         user32.ClientToScreen(self.hwnd, ctypes.byref(pt))
         x, y = max(0, pt.x), max(0, pt.y)
+        if (x, y) == (0, 0) and frame.shape[:2] == (h, w):
+            return frame  # fullscreen: the window is the whole frame (it's already our own copy)
         return frame[y:y + h, x:x + w].copy()
 
     def _setup(self, w, h):
@@ -178,8 +192,6 @@ class WindowCapture:
         picture that is black everywhere else (so positions are the same as in a full frame).
         For PCs without the fast GPU stream, where a whole frame takes ~100 ms but this tiny part
         a few. None when it can't be done (stream mode, or the window moved/minimized)."""
-        if self.cam:
-            return None
         r = wt.RECT()
         user32.GetClientRect(self.hwnd, ctypes.byref(r))
         w, h = r.right, r.bottom
@@ -187,6 +199,17 @@ class WindowCapture:
         cw, ch = x1 - x0, y1 - y0
         if w < 100 or h < 100 or cw < 8 or ch < 8:
             return None
+        if self.cam:  # the stream, pointed at just this strip
+            pt = wt.POINT(0, 0)
+            user32.ClientToScreen(self.hwnd, ctypes.byref(pt))
+            self._set_stream_region((pt.x + x0, pt.y + y0, pt.x + x1, pt.y + y1))
+            frame = self._stream_frame(1.0)
+            if frame is None or frame.shape[:2] != (ch, cw):
+                return None  # (a frame of the old region, or none yet)
+            if getattr(self, "_canvas", None) is None or self._canvas.shape[:2] != (h, w):
+                self._canvas = np.zeros((h, w, 3), np.uint8)
+            self._canvas[y0:y1, x0:x1] = frame
+            return self._canvas
         if getattr(self, "_rsize", None) != (cw, ch):
             if getattr(self, "_rsize", None):
                 gdi32.DeleteObject(self.rbmp)
@@ -359,17 +382,36 @@ class Game:
                 # Fast capture reads the screen itself, so Roblox has to be in front
                 self.focus()
                 time.sleep(0.1)
+            t0 = time.time()
             img = self.cap.grab()
-            if img is not None and img.max() > 0:
+            if img is not None and img[::48, ::48].any():  # (a sample of pixels: a whole-frame max() costs ms on a weak PC)
+                self._note_grab(time.time() - t0)
                 return img
             print("Can't see Roblox (minimized, or the display is off). Waking the display...")
             self.wake_display()
             time.sleep(2)
 
+    grab_ms, grab_n, strips = 0.0, 0, False
+
+    def _note_grab(self, seconds):
+        """Watch how long whole frames take. On a PC where that is long (27 ms on one weak PC; 8 on a good one) the
+        stream is pointed at just the reel strip while fishing (see panel_capture)."""
+        self.grab_n += 1
+        self.grab_ms = seconds * 1000 if self.grab_n == 1 else 0.95 * self.grab_ms + 0.05 * seconds * 1000
+        if self.cap.cam and not self.strips and self.grab_n >= 60 and self.grab_ms > 15:
+            self.strips = True
+            print(f"Whole frames take {self.grab_ms:.0f} ms here: reading just the reel strip while fishing.", flush=True)
+
     @property
     def slow_capture(self):
         """True when frames come from window/screen copies (no GPU stream): about 100 ms a frame on a weak PC."""
         return not self.cap.cam
+
+    @property
+    def panel_capture(self):
+        """Fishing reads only the strip around the reel panel: always without the stream, and with it on a PC where
+        whole frames are slow."""
+        return self.slow_capture or self.strips
 
     def panel_frame(self, rows_from_bottom, half_width, scale):
         """A frame holding only the strip around the reel panel (see WindowCapture.grab_region): several
@@ -384,7 +426,8 @@ class Game:
         w, h = r.right, r.bottom
         img = self.cap.grab_region(w / 2 - half_width * scale, h - rows_from_bottom[0] * scale,
                                    w / 2 + half_width * scale, h - rows_from_bottom[1] * scale)
-        if img is None or img.max() == 0:
+        if img is None or not img[int(h - rows_from_bottom[0] * scale):int(h - rows_from_bottom[1] * scale):8,
+                                  int(w / 2 - half_width * scale):int(w / 2 + half_width * scale):8].any():
             return self.frame()
         return img
 

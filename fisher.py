@@ -138,6 +138,7 @@ class Fisher:
         self.looks = []
         self.first_reel_t = None
         self.grab_ms = 0.0  # smoothed time to get one frame
+        self.grab_full_ms = 0.0  # ...and one whole frame
         if self.csv is None:
             path = os.path.join(HERE, "reel_log.csv")
             try:
@@ -177,7 +178,7 @@ class Fisher:
                 # Without the GPU stream a whole frame takes ~100 ms; the strip around the panel is all the
                 # reel needs, and several times quicker. A whole frame is still taken now and then
                 # (for watch: events, chat, coins) while not reeling.
-                panel_only = (game.slow_capture and scale is not None
+                panel_only = (game.panel_capture and scale is not None
                               and (state == "reel" or now - last_full < SLOW_FULL_EVERY))
                 if panel_only:
                     rows = REEL_ROWS if state == "reel" else PANEL_FROM_BOTTOM
@@ -188,6 +189,7 @@ class Fisher:
                     t_grab = time.time()
                     img = game.frame()
                     last_full = time.time()
+                    self.grab_full_ms = 0.9 * self.grab_full_ms + 0.1 * (last_full - t_grab) * 1000
                     scale = game.ui_scale(img)
                     if watch and not pending and watch(img, state == "reel"):
                         pending = True
@@ -264,8 +266,10 @@ class Fisher:
                             or (self.reel_id >= 3 and time.time() - self.first_reel_t > 240)):
                         mid = sorted(self.looks)[len(self.looks) // 2]
                         self.on_log_ready(f"window {img.shape[1]}x{img.shape[0]}, ui scale {game.ui_scale(img):.2f}, "
-                                          f"capture {game.cap.mode}, median {mid:.0f} looks/s, "
-                                          f"frame grab {self.grab_ms:.0f} ms, {self.reeler.lead:.2f}s lead")
+                                          f"capture {game.cap.mode}{' + strip' if game.strips or game.slow_capture else ''}, "
+                                          f"median {mid:.0f} looks/s, "
+                                          f"frame grab {self.grab_ms:.0f} ms (whole frame {self.grab_full_ms:.0f} ms), "
+                                          f"{self.reeler.lead:.2f}s lead")
                         self.on_log_ready = None
                     if won_pack:
                         close_popup(game)  # (the packs menu is opened next: the popup must be gone)
