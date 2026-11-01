@@ -86,6 +86,22 @@ def read_listings(game):
 MINE_DIR = os.path.join(HERE, "web", "static", "mine")
 
 
+def _card_span(img, guess, ay, s):
+    """(left, right) of the card around `guess`, the same way _tile_center finds it, or None."""
+    y0, y1 = int(ay - 190 * s), int(ay - 120 * s)
+    band = cv2.cvtColor(img[max(0, y0):y1, :], cv2.COLOR_BGR2GRAY).astype(float).mean(axis=0)
+    bright = band > 60
+    x = int(guess)
+    if not (0 <= x < len(bright)) or not bright[x]:
+        return None
+    l = r = x
+    while l > 0 and bright[l - 1]:
+        l -= 1
+    while r < len(bright) - 1 and bright[r + 1]:
+        r += 1
+    return (l, r) if 150 * s <= r - l <= 215 * s else None
+
+
 def _tile_center(img, guess, ay, s):
     """The x of a tile's middle, from where its card sits in the picture: the card is a
     bright block on the dark market panel, so find the bright run of columns, in a band
@@ -171,7 +187,11 @@ def _tiles(game, img, words):
         fname = f"m_{len(items):02d}.jpg"
         # the whole tile from the card's top to its "You're winning!" line (card, amount, time left), twice the size,
         # so the website can show it enlarged when the reading of it was wrong
-        crop = img[max(0, int(top - 6 * s)):min(h, int(ay + 100 * s)), max(0, int(cx - 112 * s)):int(cx + 112 * s)]  # (a little wider than the tile: its centre can be off by a few px)
+        # cut to the card's own edges when they can be found, so every picture is the same size with the card filling
+        # it (a fixed width around a guessed centre left some cards small, with slices of the neighbours beside them)
+        span = _card_span(img, ax + 27 * s, ay, s)
+        x0, x1 = (span[0] - 14 * s, span[1] + 14 * s) if span else (cx - 99 * s, cx + 99 * s)  # (a dark card edge reads as background)
+        crop = img[max(0, int(top - 6 * s)):min(h, int(ay + 100 * s)), max(0, int(x0)):int(x1)]
         if crop.size:
             cv2.imwrite(os.path.join(MINE_DIR, fname),
                         cv2.resize(crop, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC), [cv2.IMWRITE_JPEG_QUALITY, 90])

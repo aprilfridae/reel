@@ -34,20 +34,21 @@ def _add(entry):
     webstate.update("packlog.json", [], lambda log: (log + [entry])[-KEEP:])
 
 
-def record_open(pack, n, img, ones, others=()):
-    """One pack reveal. `ones`: how many #1 badges were found on it, `others`: the #2-#10 badges ('#3', '#2-9', '#10');
-    a picture is kept when there are any."""
+KEEP_SHOTS = 150  # reveal pictures kept (older ones are deleted; their log lines keep no picture)
+
+
+def record_open(pack, n, img, ones=0, others=()):
+    """One pack reveal, with a picture of it for the website."""
     shot = None
-    if ones or others:
-        try:
-            os.makedirs(SHOTS, exist_ok=True)
-            shot = f"pk_{int(time.time() * 1000)}.jpg"
-            small = cv2.resize(img, (960, int(img.shape[0] * 960 / img.shape[1])), interpolation=cv2.INTER_AREA)
-            cv2.imwrite(os.path.join(SHOTS, shot), small, [cv2.IMWRITE_JPEG_QUALITY, 75])
-            for old in sorted(os.listdir(SHOTS))[:-60]:  # a few dozen pictures are plenty
-                os.remove(os.path.join(SHOTS, old))
-        except OSError:
-            shot = None
+    try:
+        os.makedirs(SHOTS, exist_ok=True)
+        shot = f"pk_{int(time.time() * 1000)}.jpg"
+        small = cv2.resize(img, (960, int(img.shape[0] * 960 / img.shape[1])), interpolation=cv2.INTER_AREA)
+        cv2.imwrite(os.path.join(SHOTS, shot), small, [cv2.IMWRITE_JPEG_QUALITY, 72])
+        for old in sorted(os.listdir(SHOTS))[:-KEEP_SHOTS]:
+            os.remove(os.path.join(SHOTS, old))
+    except OSError:
+        shot = None
     _add({"kind": "open", "pack": _human(pack), "ones": int(ones), "others": list(others), "shot": shot, "n": n})
 
 

@@ -210,7 +210,7 @@
   .lightbox img { max-width: 100%; max-height: 78vh; object-fit: contain; border: var(--hair); border-radius: var(--r); background: var(--bg); }
   .lightbox figcaption { text-align: center; font-size: 13px; overflow-wrap: anywhere; }
   .lightbox .raw { display: block; margin-top: 6px; color: var(--dim); font: 500 11px/1.4 var(--f-mono); }
-  .bid-row .thumb, .sell-row .thumb { width: 40px; height: 40px; flex: none; border: var(--hair); border-radius: 4px; background: var(--bg); object-fit: cover; }
+  .bid-row .thumb, .sell-row .thumb { width: 56px; height: 80px; object-position: top; flex: none; border: var(--hair); border-radius: 4px; background: var(--bg); object-fit: cover; }
   .cname { font-size: 12px; color: var(--dim); overflow-wrap: anywhere; }
   .bid-row .mid, .sell-row .mid { flex: 1; min-width: 0; display: grid; gap: 2px; }
   .bid-row .mid b, .sell-row .mid b { font: 700 16px/1.2 var(--f-title); overflow-wrap: anywhere; }
@@ -265,7 +265,8 @@
   .prow.hit { background: color-mix(in srgb, var(--fg) 8%, transparent); }
   .prow.hit .k { border-color: var(--fg); }
   .prow .ones { font-weight: 700; }
-  .prow img { grid-column: 3 / -1; width: min(100%, 420px); border: var(--hair); border-radius: var(--r); }
+  .prow .pshot { width: 96px; height: 54px; object-fit: cover; border: var(--hair); border-radius: 4px; }
+  .lightbox figure:has(img[src*="/packs/"]) { max-width: min(96vw, 1100px); }
   .proll { display: flex; flex-wrap: wrap; gap: 6px 10px; color: var(--dim); font: 500 11px/1.4 var(--f-mono); }
   /* trade */
   .pgrid { display: flex; flex-wrap: wrap; gap: 8px; max-height: 260px; overflow-y: auto; margin-top: 8px; }
@@ -426,7 +427,7 @@
       <div id="ones-body"></div>
     </section>
     <section class="sec panel" id="packs">
-      <header class="sec-head"><span class="eyebrow">pack log</span><h2>packs &amp; numbered cards, live</h2><span class="meta" id="packs-at"></span></header>
+      <header class="sec-head"><span class="eyebrow">pack log</span><h2>packs opened &amp; rolled, live</h2><span class="meta" id="packs-at"></span></header>
       <div id="packs-body"></div>
     </section>
     <section class="sec panel" id="trade">
@@ -662,18 +663,17 @@ $("packs-body").innerHTML = `<div class="pstats" id="packs-stats"></div><div cla
 function renderPacks(s) {
   const pl = s.packlog || {}, log = (pl.log || []).slice().reverse(), roll = pl.roll || {};
   const today = new Date(); const start = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime() / 1000;
-  const opens = log.filter(e => e.kind === "open" && e.ts >= start), ones = opens.reduce((a, e) => a + (e.ones || 0) + (e.others || []).length, 0);
-  $("nav-packs-count").textContent = ones ? String(ones) : "";
+  const opens = log.filter(e => e.kind === "open" && e.ts >= start);
+  $("nav-packs-count").textContent = opens.length ? String(opens.length) : "";
   $("packs-at").textContent = roll.at ? `rolling since ${roll.since} · read ${roll.at}` : "";
   setHtml($("packs-stats"), `<div><span class="eyebrow">opened today</span><b>${opens.length}</b></div>
-    <div><span class="eyebrow">numbered cards (#1-#10) from reveals</span><b>${ones}</b></div>
     <div><span class="eyebrow">auto-rolled this run</span><b>${roll.rolled != null ? Number(roll.rolled).toLocaleString() : "?"}</b>${roll.last ? `<span class="dim">last: ${esc(roll.last)}</span>` : ""}</div>`);
   const kinds = Object.entries(roll.by_kind || {}).sort((a, b) => b[1] - a[1]).slice(0, 12);
   setHtml($("packs-roll"), kinds.map(([k, n]) => `<span>${esc(k.replace(/_/g, " "))} ${n}</span>`).join(""));
-  const numbered = (e) => [e.ones ? "#1" + (e.ones > 1 ? " ×" + e.ones : "") : "", ...(e.others || [])].filter(Boolean).join("  ");
-  setHtml($("packs-log"), log.length ? log.map(e => `<div class="prow ${e.ones || (e.others || []).length ? "hit" : ""}"><span class="t">${esc(e.time)}</span><span class="k">${e.kind === "open" ? "opened" : "rolled"}</span>
-      <span>${esc(e.pack)}${e.kind === "roll" && e.n > 1 ? ` ×${e.n}` : ""}</span><span class="ones">${esc(numbered(e))}</span>
-      ${e.shot ? `<img src="/static/packs/${esc(e.shot)}" alt="the reveal with a numbered card" loading="lazy">` : ""}</div>`).join("")
+  setHtml($("packs-log"), log.length ? log.map(e => `<div class="prow"><span class="t">${esc(e.time)}</span><span class="k">${e.kind === "open" ? "opened" : "rolled"}</span>
+      <span>${esc(e.pack)}${e.kind === "roll" && e.n > 1 ? ` ×${e.n}` : ""}</span>
+      ${e.shot ? `<img class="pshot zoomable" src="/static/packs/${esc(e.shot)}" data-full="/static/packs/${esc(e.shot)}"
+        data-cap="${esc(e.pack + " · " + e.time)}" alt="" title="click to enlarge" loading="lazy" onerror="this.remove()">` : "<span></span>"}</div>`).join("")
     : `<div class="empty">nothing yet. packs the bot opens, and the rarer ones it rolls, show up here as they happen.</div>`);
 }
 
