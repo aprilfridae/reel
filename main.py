@@ -61,11 +61,19 @@ def main():
     import sys
     if "--selftest" in sys.argv:
         return selftest()
+    import updater
+    from version import VERSION
+    updater.wait_for_previous()  # just updated: the old copy must be gone (it holds the website's port)
     cfg = config.load()
+    print(f"UndergroundBot {VERSION}", flush=True)
     if cfg["website"]:
         start_website(cfg["website_port"])
+    if cfg["auto_update"]:
+        updater.start()
     import bot
     bot.main()
+    if updater.pending():
+        updater.install_and_restart()
 
 
 if __name__ == "__main__":

@@ -2,8 +2,8 @@
 
 Left side: the rainbow "CLAIM GIFT!" button opens Playtime Gifts, where each ready
 tier has a green "CLAIM!" button. If the button only shows a timer, nothing is ready.
-Right side: the "Daily" button opens Daily Spin; its big button reads
-"NEXT SPIN IN hh:mm:ss" until the next spin unlocks (17:00 local time each day).
+Right side: the "Daily" button opens the spin wheel (or, once today's is used, the Daily
+Spin box with "NEXT SPIN IN hh:mm:ss"); a new spin unlocks at 16:00 local time each day.
 Everything is found by reading the screen's text (OCR), so positions don't matter.
 """
 import os
@@ -71,7 +71,7 @@ def claim_gifts(game, log=print):
     return claimed
 
 
-SPIN_UNLOCK_HOUR = 17  # a new daily spin unlocks at 17:00 local time
+SPIN_UNLOCK_HOUR = 16  # a new daily spin unlocks at 16:00 local time
 SPIN_STATE = os.path.join(HERE, "daily_spin_done.txt")
 
 
@@ -92,40 +92,64 @@ def _mark_spin_done():
         f.write(_spin_period())
 
 
+_TIMER = re.compile(r"\d{1,2}:\d{2}:\d{2}")
+
+
+def _menu_text(game):
+    return " ".join(w[0] for w in _words(game, game.frame(), MIDDLE)).upper()
+
+
+def _is_wheel(text):
+    """The wheel screen ("DAY 5 SPIN", "12 prizes", "jackpot", "Streak rewards")."""
+    return any(k in text for k in ("PRIZES", "JACKPOT", "STREAK REWARDS")) and "NEXT SPIN" not in text
+
+
+def _is_summary(text):
+    """The Daily Spin box with the streak days, today's prize and "NEXT SPIN IN hh:mm:ss"."""
+    return "NEXT SPIN" in text or "DAILY SPIN" in text or "COME BACK" in text
+
+
 def daily_spin(game, log=print):
-    """Spin the daily wheel once per day (after 17:00). Opens the Daily menu and
-    reads its big button: "NEXT SPIN IN ..." means today's is already used.
-    Returns True if it spun."""
+    """Spin the daily wheel once a day (it unlocks at 16:00 local time). The Daily button
+    shows a timer under its name once today's spin is used. When it's ready, the button
+    opens the wheel: its green SPIN button is in the wheel's centre (OCR can't read it
+    reliably, it pulses), and after the spin the Daily Spin box with "NEXT SPIN IN ..."
+    comes up. Returns True if it spun."""
     if _spin_done_this_period():
         return False
     close_popup(game)
     img = game.frame()
-    daily = [(x, y) for t, x, y in _words(game, img, RIGHT_BUTTONS) if t.lower().startswith("daily")]
+    words = _words(game, img, RIGHT_BUTTONS)
+    daily = [(x, y) for t, x, y in words if t.lower().startswith("daily")]
     if not daily:
+        return False
+    if any(_TIMER.fullmatch(t) and abs(y - daily[0][1]) < 60 for t, x, y in words):
+        _mark_spin_done()  # a countdown under "Daily": already spun
         return False
     game.click(*daily[0])
     game.park_mouse()
-    game.wait(1.2)
-    words = _words(game, game.frame(), MIDDLE)
-    text = " ".join(w[0] for w in words).upper()
-    if "DAILY" not in text:
-        log("Clicked Daily but the Daily Spin menu didn't open")
+    text = ""
+    for _ in range(5):
+        game.wait(0.6)
+        text = _menu_text(game)
+        if _is_wheel(text) or _is_summary(text):
+            break
+    if _is_summary(text):
+        _mark_spin_done()  # nothing to spin
         _close(game)
         return False
-    if "NEXT SPIN" in text or "ALREADY CLAIMED" in text:
-        _mark_spin_done()
+    if not _is_wheel(text):
+        log(f"Clicked Daily but the Daily Spin menu didn't open (read: {text[:80]!r})")
         _close(game)
         return False
-    # The big spin button is the lowest "SPIN" on the menu (the title also says SPIN)
-    spin = sorted(((x, y) for t, x, y in words if "SPIN" in t.upper()), key=lambda p: p[1])
-    if len(spin) < 2:
-        log(f"Daily Spin is ready but its button wasn't found (read: {text[:100]!r})")
-        _close(game)
-        return False
-    game.click(*spin[-1])
+    h, w = game.frame().shape[:2]
+    game.click(w // 2, h // 2)
     game.park_mouse()
     log("Spun the daily wheel")
-    game.wait(8)  # let the wheel finish
+    for _ in range(20):  # the wheel turns for about 6 seconds, then the prize box shows
+        game.wait(1.0)
+        if _is_summary(_menu_text(game)):
+            break
     _mark_spin_done()
     close_popup(game)
     _close(game)

@@ -33,6 +33,7 @@ import market_scan
 import mybids
 import whoowns
 import rebirth
+import updater
 import webstate
 from config import load as load_config
 from events import EventWatcher
@@ -482,6 +483,9 @@ def main():
                     and datetime.now().hour < PACK_SESSION_LATEST)
 
     def one_round():
+        if updater.pending():
+            log("A newer version is downloaded: restarting into it")
+            raise StopBot()
         if time.time() - dc["checked"] > 20:
             dc["checked"] = time.time()
             if launcher.is_disconnected(game):
@@ -516,7 +520,7 @@ def main():
         log("Fishing" + ("" if auto() else " only (set on the website)"))
         teleport_to_fishing(game)
         fishing_mode = mode()
-        fisher.run(should_stop=lambda: meteor_soon() or session_due() or market_work()
+        fisher.run(should_stop=lambda: updater.pending() or meteor_soon() or session_due() or market_work()
                    or once("packs") or once("index") or mode() != fishing_mode,
                    on_catch=check_atlantis,
                    on_stuck=lambda: teleport_to_fishing(game),
