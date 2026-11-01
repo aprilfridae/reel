@@ -175,10 +175,10 @@ def set_bid_anyway():
 
 @app.post("/api/mode")
 def set_mode():
-    """What the bot should be doing: auto (the schedule), fish (just fish) or pause."""
+    """What the bot should be doing: auto (the schedule), fish (just fish), packs (keep opening packs) or pause."""
     mode = request.get_json(force=True).get("mode")
-    if mode not in ("auto", "fish", "pause"):
-        return jsonify(error="mode must be auto, fish or pause"), 400
+    if mode not in ("auto", "fish", "packs", "pause"):
+        return jsonify(error="mode must be auto, fish, packs or pause"), 400
     webstate.update("mode.json", {}, lambda m: {**m, "mode": mode})
     return jsonify(ok=True)
 

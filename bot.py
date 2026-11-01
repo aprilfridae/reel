@@ -48,6 +48,7 @@ from packs import Packs, close_any_menu, close_popup, teleport_to_fishing
 
 FULL_CHECK_EVERY = 60  # seconds; backup Packs-menu check during an event
 EVENT_DEBOUNCE = 8  # seconds a new banner reading must hold before an event start / end is believed
+PACKS_MODE_RECHECK = 120  # "open packs" mode: seconds between looks for new packs once none are left
 METEOR_STOP_FISHING = 20  # seconds before a meteor event: don't start new casts
 METEOR_TELEPORT = 4  # seconds before it: teleport to Spawn (the teleport takes ~2.5s)
 CFG = load_config()
@@ -110,8 +111,9 @@ def main():
         return req["any"]
 
     # What the website says to do (mode.json): mode "auto" (the schedule, the default),
-    # "fish" (just fish; no pack sessions, rebirths, Index or hourly market checks) or
-    # "pause" (do nothing); and one-time jobs in "once" ("packs", "index").
+    # "fish" (just fish; no pack sessions, rebirths, Index or hourly market checks),
+    # "packs" (keep opening packs, no fishing) or "pause" (do nothing); and one-time jobs
+    # in "once" ("packs", "index").
     ms = {"checked": 0.0, "value": {}}
 
     def settings():
@@ -490,6 +492,22 @@ def main():
         else:
             log("Pack session paused (bid/buy/chat); it picks up again right after")
 
+    pm = {"next": 0.0}
+
+    def run_packs_mode():
+        """The "open packs" mode: every Rainbow-or-rarer and event pack, then a look for new ones every couple of
+        minutes. Chat, bids, the market and trades cut in (the round handles them, then this carries on)."""
+        if time.time() < pm["next"]:
+            game.release_all()
+            game.wait(1)
+            return
+        log("Open packs mode: opening every Rainbow-or-rarer and event pack")
+        done = packs.open_session(should_stop=lambda: updater.pending() or market_work() or chat_waiting()
+                                  or tflow.busy() or tflow.has_cmds() or mode() != "packs", log=log)
+        if done:
+            pm["next"] = time.time() + PACKS_MODE_RECHECK
+            log(f"Open packs mode: none left; looking again in {PACKS_MODE_RECHECK // 60} minutes")
+
     # one-time jobs from the website don't survive a restart (a stuck one would come back forever)
     webstate.update("mode.json", {}, lambda m: {**m, "once": []})
 
@@ -548,6 +566,9 @@ def main():
             done_once("index")
         if idx["wanted"]:
             run_index()
+            return
+        if mode() == "packs":
+            run_packs_mode()
             return
         if once("packs") and mode() == "fish":
             done_once("packs")  # "fish" means only fish: a leftover "open packs now" is dropped

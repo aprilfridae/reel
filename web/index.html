@@ -154,24 +154,6 @@
   .pill.done { background: var(--fg); color: var(--bg); }
   .pill.working { border-style: dotted; }
   .pill.failed, .pill.cancelled { border-style: dashed; color: var(--dim); border-color: var(--dim); text-decoration: line-through; }
-  #log-fold > summary { list-style: none; display: flex; align-items: center; justify-content: flex-end; gap: 12px; cursor: pointer; margin-bottom: 12px;
-                        font-size: 12px; color: var(--dim); }
-  #log-fold > summary::-webkit-details-marker { display: none; }
-  #log-fold > summary:focus-visible { outline: 1px solid var(--fg); outline-offset: 4px; }
-  #log-fold > summary .i { transition: transform var(--t) var(--ease); }
-  #log-fold:not([open]) > summary .i { transform: rotate(-90deg); }
-  #log-fold:not([open]) > summary { margin-bottom: 0; }
-  #log-active:empty { display: none; }
-  .reqs { border: var(--hair); border-radius: var(--r); overflow: hidden; }
-  .req, .reqhead { display: grid; grid-template-columns: minmax(0, 2.2fr) minmax(0, 1.6fr) 90px 100px 72px; align-items: center; gap: 16px; padding: 12px 16px; border-top: var(--hair); }
-  .reqhead { border-top: 0; padding-top: 8px; padding-bottom: 8px; background: var(--bg); font: 500 10px/1.4 var(--f-mono); letter-spacing: .12em; color: var(--dim); }
-  .req > div, .reqhead > div { min-width: 0; overflow-wrap: anywhere; }
-  .req .what { display: flex; align-items: center; gap: 12px; font-weight: 600; }
-  .req .what .rimg { width: 32px; height: 32px; flex: none; border: var(--hair); border-radius: 4px; background: var(--bg); object-fit: cover; display: grid; place-items: center; overflow: hidden; }
-  .req .what span.rimg { color: var(--dim); }
-  .req .res, .req .at { color: var(--dim); font-size: 12px; }
-  .req .act { text-align: right; }
-  .req button { height: 28px; font-size: 12px; padding: 0 10px; }
 
   /* game chat */
   .chat-box { height: 416px; overflow-y: auto; border: var(--hair); border-radius: var(--r); background: var(--bg); padding: 16px; display: flex; flex-direction: column; gap: 14px; }
@@ -388,6 +370,7 @@
     button.mode.on:not(:disabled):hover { border-color: var(--fg); box-shadow: var(--glow-soft); }
   }
   #mode-note { font-size: 12px; color: var(--dim); margin: 12px 0 20px; min-height: 18px; }
+  #controls .modes { grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }  /* full width at the top: modes side by side */
   .once { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-top: 12px; }
 
   /* rebirth banner */
@@ -435,9 +418,6 @@
     #rb-form button { flex: 1; }
     .mgrid { grid-auto-flow: column; grid-auto-columns: 85%; grid-template-columns: none; overflow-x: auto; scroll-snap-type: x mandatory; padding-bottom: 8px; }
     .mgrid .mcard { scroll-snap-align: start; }
-    .req { grid-template-columns: 1fr auto; gap: 6px 12px; }
-    .reqhead { display: none; }
-    .req .what { grid-column: 1 / -1; }
     .msg .mc { max-width: 85%; }
     .sec-head h2 { font-size: 22px; }
     body.nav-open { overflow: hidden; }
@@ -460,14 +440,13 @@
     <button class="icon side-close" id="menu-close" aria-label="close menu"></button>
   </div>
   <nav id="nav" aria-label="sections">
-    <a href="#market" data-icon="market" class="on"><span class="lbl">market</span><span class="count" id="nav-market-count"></span></a>
+    <a href="#controls" data-icon="sliders" class="on"><span class="lbl">bot controls</span></a>
+    <a href="#market" data-icon="market"><span class="lbl">market</span><span class="count" id="nav-market-count"></span></a>
     <a href="#activity" data-icon="activity"><span class="lbl">my activity</span><span class="count" id="nav-activity-count"></span></a>
-    <a href="#ones" data-icon="crown"><span class="lbl">my #1s</span><span class="count" id="nav-ones-count"></span></a>
     <a href="#packs" data-icon="box"><span class="lbl">pack log</span><span class="count" id="nav-packs-count"></span></a>
     <a href="#trade" data-icon="swap"><span class="lbl">trade</span><span class="count" id="nav-trade-count"></span></a>
     <a href="#who" data-icon="search"><span class="lbl">who owns?</span></a>
-    <a href="#controls" data-icon="sliders"><span class="lbl">bot controls</span></a>
-    <a href="#log" data-icon="history"><span class="lbl">request log</span></a>
+    <a href="#ones" data-icon="crown"><span class="lbl">my #1s</span><span class="count" id="nav-ones-count"></span></a>
     <a href="#chat" data-icon="chat"><span class="lbl">game chat</span></a>
   </nav>
   <div class="side-foot"><span class="dot" id="side-dot"></span><span id="side-status">connecting…</span></div>
@@ -491,6 +470,10 @@
   </header>
 
   <main>
+    <section class="sec panel" id="controls">
+      <header class="sec-head"><span class="eyebrow">bot controls</span><h2>what it's doing</h2><span class="meta" id="controls-at"></span></header>
+      <div id="controls-body"></div>
+    </section>
     <section class="sec" id="market">
       <header class="sec-head"><span class="eyebrow">live market</span><h2>worth watching</h2><span class="meta" id="market-at"></span></header>
       <div id="market-body"></div>
@@ -498,10 +481,6 @@
     <section class="sec" id="activity">
       <header class="sec-head"><span class="eyebrow">my listings &amp; bids</span><h2>your market activity</h2><span class="meta" id="activity-at"></span></header>
       <div id="activity-body"></div>
-    </section>
-    <section class="sec" id="ones">
-      <header class="sec-head"><span class="eyebrow">my #1s</span><h2>found, all time</h2><span class="meta" id="ones-at"></span></header>
-      <div id="ones-body"></div>
     </section>
     <section class="sec panel" id="packs">
       <header class="sec-head"><span class="eyebrow">pack log</span><h2>packs opened &amp; rolled, live</h2><span class="meta" id="packs-at"></span></header>
@@ -511,23 +490,17 @@
       <header class="sec-head"><span class="eyebrow">trade</span><h2>swap cards</h2><span class="meta" id="trade-at"></span></header>
       <div id="trade-body"></div>
     </section>
-    <div class="pair">
-      <section class="sec panel" id="who">
-        <header class="sec-head"><span class="eyebrow">who owns?</span><h2>find a card</h2><span class="meta" id="who-at"></span></header>
-        <div id="who-body"></div>
-      </section>
-      <section class="sec panel" id="controls">
-        <header class="sec-head"><span class="eyebrow">bot controls</span><h2>what it's doing</h2><span class="meta" id="controls-at"></span></header>
-        <div id="controls-body"></div>
-      </section>
-    </div>
+    <section class="sec panel" id="who">
+      <header class="sec-head"><span class="eyebrow">who owns?</span><h2>find a card</h2><span class="meta" id="who-at"></span></header>
+      <div id="who-body"></div>
+    </section>
+    <section class="sec" id="ones">
+      <header class="sec-head"><span class="eyebrow">my #1s</span><h2>found, all time</h2><span class="meta" id="ones-at"></span></header>
+      <div id="ones-body"></div>
+    </section>
     <section class="sec panel" id="rebirth">
       <header class="sec-head"><span class="eyebrow">rebirth</span><h2>begin again, luckier</h2><span class="meta" id="rebirth-at"></span></header>
       <div id="rebirth-body"></div>
-    </section>
-    <section class="sec panel" id="log">
-      <header class="sec-head"><span class="eyebrow">bids &amp; buys log</span><h2>recent requests</h2><span class="meta" id="log-at"></span></header>
-      <div id="log-body"></div>
     </section>
     <section class="sec panel" id="chat">
       <header class="sec-head"><span class="eyebrow">game chat</span><h2>in the server</h2><span class="meta" id="chat-at">read off the screen</span></header>
@@ -967,13 +940,14 @@ $("trade-body").addEventListener("click", (e) => {
 const MODES = [
   ["auto", "sparkle", "auto", "Follows the schedule: fish, event packs, nightly packs and rebirth, hourly market check"],
   ["fish", "fish", "fish only", "Only fish. No pack sessions, rebirths, Index or hourly market checks"],
+  ["packs", "box", "open packs", "Open every Rainbow-or-rarer and event pack, then keep opening new ones as they come in. No fishing"],
   ["pause", "pause", "paused", "Do nothing (chat, bids and rebirths from here still go through)"],
 ];
 $("controls-body").innerHTML = `<div class="modes" role="radiogroup" aria-label="bot mode">${MODES.map(([k, ic, name, desc]) =>
     `<button class="mode" data-mode="${k}" role="radio" aria-checked="false">${icon(ic)}<span class="mtxt"><b>${name}</b><span>${desc}</span></span><span class="radio"></span></button>`).join("")}</div>
   <div id="mode-note"></div>
   <div class="eyebrow">one-time actions</div>
-  <div class="once"><button data-do="packs">${icon("box")}<span>open packs now</span></button><button data-do="index">${icon("crown")}<span>record #1s now</span></button><button data-scan>${icon("refresh")}<span class="lbl">check market now</span></button></div>
+  <div class="once"><button data-do="index">${icon("crown")}<span>record #1s now</span></button><button data-scan>${icon("refresh")}<span class="lbl">check market now</span></button></div>
   <details class="adv" id="adv"><summary>advanced settings</summary>
   <div class="eyebrow" style="margin-top:12px">ping compensation (fishing)</div>
   <div class="fishset">
@@ -1066,7 +1040,7 @@ function renderControls(s) {
     b.setAttribute("aria-checked", b.dataset.mode === mode);
   });
   $("mode-note").textContent = ({auto: "Following the schedule.", fish: "Only fishing (bids, buys, chat and rebirths still work).",
-    pause: "Paused."})[mode] + (queued.length ? ` Queued: ${queued.join(", ")}.` : "");
+    packs: "Opening packs (bids, buys, chat and trades still work).", pause: "Paused."})[mode] + (queued.length ? ` Queued: ${queued.join(", ")}.` : "");
 }
 $("rebirth-body").innerHTML = `<div class="rb">
   <div class="rb-title"><span class="ico">${icon("refresh")}</span><div><b>begin again, luckier.</b><div class="bidbox" id="bidbox"><span class="dot"></span><span id="bid-text">Checking bids…</span></div></div></div>
@@ -1102,39 +1076,6 @@ function renderRebirth(s) {
   $("rb-cost").textContent = rb.cost || "?";
   $("rb-luck").textContent = rb.luck_now ? `x${rb.luck_now} → x${rb.luck_after ?? "?"}` : "?";
   $("rebirth-at").textContent = rb.at ? `read ${rb.at}` : "not read yet";
-}
-const reqWhat = (r) => {
-  const c = r.card || {};
-  return r.kind === "rebirth" ? `<b>rebirth x${esc(r.amount)}</b>`
-    : r.kind === "lookup" ? `<b>who owns ${esc(c.artist)}</b> (${esc(c.rarity)}${c.find ? " #" + esc(c.find) : ""})`
-    : r.kind === "join" ? `<b>join ${esc(c.name)}'s server</b> (#${esc(c.serial)} ${esc(c.artist)})`
-    : `<b>${r.kind === "buy" ? "buy now" : "bid " + esc(r.amount)}</b> on #${esc(c.serial)} from ${esc(c.seller || "?")}`;
-};
-const REQ_ICON = {rebirth: "refresh", lookup: "search", join: "external"};
-$("log-body").innerHTML = `<details id="log-fold" open>
-  <summary><span id="log-count"></span><span class="chip" id="log-active"></span>${icon("chevron")}</summary>
-  <div class="reqs"><div class="reqhead"><div>request</div><div>result</div><div>time</div><div>status</div><div></div></div><div id="log-rows"></div></div>
-</details>`;
-try { if (localStorage.getItem("logOpen") === "0") $("log-fold").open = false; } catch {}
-$("log-fold").addEventListener("toggle", () => {
-  try { localStorage.setItem("logOpen", $("log-fold").open ? "1" : "0"); } catch {}
-});
-function renderLog(s) {
-  const reqs = s.requests || [];
-  const active = reqs.filter(r => r.status === "waiting" || r.status === "working").length;
-  $("log-count").textContent = reqs.length ? `${reqs.length} request${reqs.length > 1 ? "s" : ""}` : "nothing yet";
-  $("log-active").textContent = active ? `${active} active` : "";
-  $("log-at").textContent = reqs.length ? `last: ${String(reqs[reqs.length - 1].asked_at || "").split(" ").pop()}` : "";
-  setHtml($("log-rows"), reqs.length ? reqs.slice().reverse().map(r => {
-    const c = r.card || {};
-    const thumb = c.image ? `<img class="rimg" src="/static/cards/${esc(c.image)}" alt="">`
-      : `<span class="rimg">${icon(REQ_ICON[r.kind] || "history")}</span>`;
-    return `<div class="req"><div class="what">${thumb}<span>${reqWhat(r)}</span></div>
-      <div class="res">${esc(r.result || "")}</div>
-      <div class="at">${esc(String(r.asked_at || "").split(" ").pop())}</div>
-      <div><span class="pill ${esc(r.status)}">${esc(r.status)}</span></div>
-      <div class="act">${r.status === "waiting" ? `<button data-cancel="${esc(r.id)}">cancel</button>` : ""}</div></div>`;
-  }).join("") : `<div class="empty">nothing yet.</div>`);
 }
 
 $("chat-body").innerHTML = `<div class="chat-box" id="chat-box"></div><div id="outbox"></div>
@@ -1276,7 +1217,7 @@ async function refresh() {
   const live = ((s.market || {}).cards || []).filter(c => !c.ends_ts || c.ends_ts > nowSecs).length;
   $("nav-market-count").textContent = live ? String(live) : "";
   // one section failing to draw must not stop the others
-  for (const draw of [renderMarket, renderActivity, renderOnes, renderPacks, renderTrade, renderWho, renderControls, renderRebirth, renderLog, renderOutbid, renderTradePop]) {
+  for (const draw of [renderMarket, renderActivity, renderOnes, renderPacks, renderTrade, renderWho, renderControls, renderRebirth, renderOutbid, renderTradePop]) {
     try { draw(s); } catch (err) { console.error(err); }
   }
   try { renderChat(s.chat || [], s.outbox || []); } catch (err) { console.error(err); }
@@ -1326,7 +1267,6 @@ async function onClick(e) {
   } else if (t.dataset && t.dataset.mode) {
     await post("/api/mode", {mode: t.dataset.mode}); refresh();
   } else if (t.dataset && t.dataset.do) {
-    if (t.dataset.do === "packs" && !confirm("Open every Rainbow-or-rarer and event pack now?")) return;
     await post("/api/do", {what: t.dataset.do}); refresh();
   } else if (t.id === "menu-btn") {
     document.body.classList.toggle("nav-open");
