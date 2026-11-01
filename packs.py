@@ -325,6 +325,9 @@ class Packs:
         Returns the (x, y) of its OPEN button, or None if it's missing or greyed out."""
         g = self.game
         img = g.frame()
+        btn, _ = self._open_button_under(img, pack)
+        if btn:
+            return btn  # already in view (the menu opens at the top): no scrolling needed
         cx, cy = self._menu_center(img)
         g.scroll(cx, cy, 15, check=False)  # back to the top (the menu is open: no need to check it each time)
         g.wait(0.25)
@@ -384,10 +387,27 @@ class Packs:
                 h, w = img.shape[:2]
                 cv2.imwrite(path, img[int(h * 0.9):, int(w * 0.8):])
 
+    _recorder = None
+
     def _record_reveal(self, img, pack):
+        """Look at a reveal for new-rarity cards in the background: the picture matching took
+        about 3 seconds a reveal, which held the next pack up (non-event packs opened at
+        3 s each, event packs at 9). One worker, so reveals are recorded in order."""
+        if Packs._recorder is None:
+            from concurrent.futures import ThreadPoolExecutor
+            Packs._recorder = ThreadPoolExecutor(max_workers=1)
+        Packs._recorder.submit(self._record_reveal_now, img.copy(), pack)
+
+    def _record_reveal_now(self, img, pack):
         """Save a reveal only if it has a Blood or Eclipse rarity card in it (the new
         rarities, where #1s are still up for grabs). The #1 badge doesn't always show
         here, so the Index check after the event is the real record."""
+        try:
+            self._record_reveal_sync(img, pack)
+        except Exception as e:
+            print(f"(couldn't record a reveal: {e})", flush=True)
+
+    def _record_reveal_sync(self, img, pack):
         self._learn_last_label(img, pack)
         rare = find_rarity_cards(img)
         if not rare:

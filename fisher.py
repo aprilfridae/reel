@@ -13,12 +13,13 @@ from game import HERE, Game, StopBot
 from packs import close_popup, dismiss_popup, read_catch_popup
 from vision import detect
 
-# Bar physics fitted from live reels on a test PC at 50 fps (px/s^2 at UI scale 1)
+# Bar physics fitted from live reels on Angie's PC at 50 fps (px/s^2 at UI scale 1)
 A_HOLD = 1015
 A_RELEASE = 737
 DEFAULT_LEAD = 0.4  # best in replays of real reels (analysis/sim_reels.py)
 CAST_DELAY = 0.3  # seconds the fishing panel must be gone before the first cast press
 RECAST_EVERY = 0.4  # then E is pressed this often until a cast starts (the panel takes ~0.3s to show)
+PENDING_WAIT = 20  # seconds act() (opening event packs...) waits for a cast in the water to be caught
 STUCK_AFTER = 15  # seconds of pressing E with no fishing panel before it counts as stuck
 
 
@@ -138,14 +139,18 @@ class Fisher:
         saved_stuck = False
         last_zone = 0.0
         pending = False
+        pending_since = 0.0
         try:
             while True:
                 now = time.time()
                 img = game.frame()
                 if watch and not pending and watch(img, state == "reel"):
                     pending = True
+                    pending_since = now
                 d = detect(img, game.ui_scale(img))
-                if pending and not d["zone"] and state != "reel":
+                # act() opens menus: not while a fish is on the line or being reeled (that catch is
+                # finished and its popup closed first), but don't wait more than PENDING_WAIT for it
+                if pending and not d["zone"] and state != "reel" and (not d["busy"] or now - pending_since > PENDING_WAIT):
                     game.key("e", False)
                     close_popup(game)
                     act()
