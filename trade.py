@@ -8,7 +8,6 @@ Nothing here adds a card, presses READY or sends a trade on its own: the website
 import hashlib
 import os
 import re
-import time
 
 import cv2
 import numpy as np

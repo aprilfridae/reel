@@ -49,8 +49,6 @@ from packs import Packs, close_any_menu, close_popup, teleport_to_fishing
 FULL_CHECK_EVERY = 60  # seconds; backup Packs-menu check during an event
 EVENT_DEBOUNCE = 8  # seconds a new banner reading must hold before an event start / end is believed
 PACKS_MODE_RECHECK = 120  # "open packs" mode: seconds between looks for new packs once none are left
-METEOR_STOP_FISHING = 20  # seconds before a meteor event: don't start new casts
-METEOR_TELEPORT = 4  # seconds before it: teleport to Spawn (the teleport takes ~2.5s)
 CFG = load_config()
 ATLANTIS_POPUP = os.path.join(HERE, "atlantis_popup.png")
 PACK_SESSION_START, PACK_SESSION_LATEST = CFG["session_start_hour"], CFG["session_end_hour"]
@@ -379,12 +377,6 @@ def main():
         if n:
             log(f"Opened {pack.replace('_', ' ')} x{n}")
 
-    def meteor_soon():
-        # Chasing meteor circles needs a top-down camera, and the camera is never
-        # moved anymore (recorded walks depend on it), so meteor events are skipped:
-        # the bot just keeps fishing through them.
-        return False
-
     def watch(img, reeling):
         """Runs on every frame while fishing; True means 'stop and act()'.
         During a reel only cheap work: changed labels are kept and read afterwards."""
@@ -475,7 +467,7 @@ def main():
         manual = once("packs")  # "Open packs now" on the website
         log("Pack session: opening every Rainbow-or-rarer and event pack" + (" (asked for on the website)" if manual else ""))
         try:
-            done = packs.open_session(should_stop=lambda: meteor_soon() or market_work() or chat_waiting()
+            done = packs.open_session(should_stop=lambda: market_work() or chat_waiting()
                                       or mode() in ("pause", "fish") or (not manual and not auto()), log=log)
         except Exception:
             if manual:
@@ -583,7 +575,7 @@ def main():
         teleport_to_fishing(game)
         fishing_mode = mode()
         fisher.run(should_stop=lambda: updater.pending() or tflow.busy() or tflow.has_cmds()
-                   or meteor_soon() or session_due() or market_work()
+                   or session_due() or market_work()
                    or once("packs") or once("index") or mode() != fishing_mode,
                    on_catch=check_atlantis,
                    on_stuck=lambda: teleport_to_fishing(game),

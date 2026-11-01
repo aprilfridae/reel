@@ -2,12 +2,11 @@
 
 The bot never completes a trade by itself. When a trade window is open it puts both card lists in serial
 order, reads the first cards of each (plus which of mine the other player wants) for the website, and keeps a
-small live picture there; every action (accept/decline a request, send one, READY, Cancel, search, rescan)
-only happens when the website asks for it.
+small live picture there; every action (accept/decline a request, send one, add / take out / ask for a card,
+coins, READY, Cancel, search, rescan) only happens when the website asks for it.
 """
 import os
 import time
-import uuid
 
 import cv2
 
@@ -21,16 +20,6 @@ SNAP_EVERY = 2.0  # seconds between live pictures while a trade window is open
 POLL_EVERY = 1.5  # seconds between looks for a window / request popup while fishing
 LIST_LIMIT = 40  # cards read from each list (the website shows the 20 lowest serials)
 WANTS_EVERY = 3.0  # seconds between looks at "they want N of your cards" while a trade window is open
-
-
-def _serial_key(c):
-    s = c.get("serial")
-    if s is None:
-        return 10 ** 9
-    try:
-        return int(s)
-    except ValueError:
-        return 5 if s == "2-9" else 10 ** 9
 
 
 class TradeFlow:
@@ -266,14 +255,3 @@ class TradeFlow:
             self.snapshot()
             return ok, cmd
         return False, "unknown command"
-
-
-def add_cmd(cmd, args=None):
-    c = {"id": uuid.uuid4().hex[:8], "cmd": cmd, "args": args or {}, "status": "waiting", "result": "",
-         "at": time.strftime("%H:%M:%S")}
-    webstate.update("trade_cmd.json", [], lambda cs: (cs + [c])[-40:])
-    return c
-
-
-def sorted_top(cards, n=20):
-    return sorted(cards, key=_serial_key)[:n]

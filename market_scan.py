@@ -28,7 +28,6 @@ BADGE = (-357, -332, 30, 63)  # badge box: y0, y1 relative to BID; x0, x1 relati
 TEXT_TOP = -140  # the price / time / seller lines
 CARD_BOTTOM_TOP = (-393, -146)  # the card itself (no price box), relative to BID
 CARD_HALF_W = 91
-SORT_BUTTON_TEXT = "Sort:"
 
 
 def _columns(w, s):

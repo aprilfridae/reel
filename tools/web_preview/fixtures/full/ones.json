@@ -1,0 +1,26 @@
+[
+ {
+  "id": "blood_1",
+  "rarity": "blood",
+  "image": "blood_1.jpg",
+  "found_at": "2026-10-30 19:22"
+ },
+ {
+  "id": "eclipse_1",
+  "rarity": "eclipse",
+  "image": "eclipse_1.jpg",
+  "found_at": "2026-10-30 20:01"
+ },
+ {
+  "id": "kawaii_1",
+  "rarity": "kawaii",
+  "image": "kawaii_1.jpg",
+  "found_at": "2026-10-31 08:15"
+ },
+ {
+  "id": "iced_1",
+  "rarity": "iced",
+  "image": "iced_1.jpg",
+  "found_at": "2026-10-31 09:02"
+ }
+]

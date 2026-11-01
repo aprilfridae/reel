@@ -1,4 +1,4 @@
-﻿"""Game chat: read it off the screen, and send messages typed on the website.
+"""Game chat: read it off the screen, and send messages typed on the website.
 
 Reading: the chat box sits at the top left. Its lines are OCR'd every few seconds
 and only the new ones (past what was already there) are added to web/data/chat.json.

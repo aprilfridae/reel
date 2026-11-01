@@ -1,0 +1,37 @@
+{
+ "scanned_at": "2026-10-31 14:32:18",
+ "scanned_ts": 1793437938,
+ "cards": [
+  {
+   "serial": "1",
+   "image": "card1.jpg",
+   "seen_at": "2026-10-31 14:32:18",
+   "top_bid": "650B",
+   "buy_now": "2T",
+   "seller": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "top_bidder": "bidderone",
+   "time_left": "3m 20s",
+   "ends_in": 200
+  },
+  {
+   "serial": "2",
+   "image": "card2.jpg",
+   "seen_at": "2026-10-31 14:32:18",
+   "start": "120B",
+   "seller": "fisher_two",
+   "time_left": "1h 30m",
+   "ends_in": 5400
+  },
+  {
+   "serial": "3",
+   "image": "card3.jpg",
+   "seen_at": "2026-10-31 14:32:18",
+   "top_bid": "88B",
+   "seller": "third_seller",
+   "top_bidder": "kitten9",
+   "time_left": "23h 50m",
+   "ends_in": 86000,
+   "buy_now": "500B"
+  }
+ ]
+}

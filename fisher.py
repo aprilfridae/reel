@@ -14,10 +14,10 @@ from game import HERE, Game, StopBot
 from packs import close_popup, dismiss_popup, read_catch_popup
 from vision import PANEL_FROM_BOTTOM, PANEL_HALF_WIDTH, STRIP_HALF, STRIP_ROWS, detect
 
-# Bar physics fitted from live reels on Angie's PC at 50 fps (px/s^2 at UI scale 1)
+# Bar physics fitted from live reels on a test PC at 50 fps (px/s^2 at UI scale 1)
 A_HOLD = 1015
 A_RELEASE = 737
-DEFAULT_LEAD = 0.4  # best in replays of real reels (analysis/sim_reels.py)
+DEFAULT_LEAD = 0.4  # best in replays of real reels (from offline replays of recorded reels)
 CAST_DELAY = 0.3  # seconds the fishing panel must be gone before the first cast press
 RECAST_EVERY = 0.4  # then E is pressed this often until a cast starts (the panel takes ~0.3s to show)
 SLOW_FULL_EVERY = 0.5  # seconds between whole-window frames while fishing without the GPU stream
@@ -32,8 +32,8 @@ STUCK_AFTER = 15  # seconds of pressing E with no fishing panel before it counts
 def fit_lag(reels, min_frames=15):
     """How long after E is pressed or released the bar starts to answer, fitted from recorded reels
     [(times, bar centres, holds)]: acceleration = (A_hold if held else -A_release) + drag * velocity, with the
-    hold delayed by `lag`. About 50 ms on Angie's PC and 175 ms on a PC with a slower link to the game
-    (analysis/fit_physics.py). None if there isn't enough to go on."""
+    hold delayed by `lag`. About 50 ms on a test PC and 175 ms on a PC with a slower link to the game
+    (fitted offline from recorded reels). None if there isn't enough to go on."""
     import numpy as np
     hz = 50.0
     rs = []
@@ -72,51 +72,10 @@ def fit_lag(reels, min_frames=15):
 
 def lead_for_lag(lag):
     """How far ahead (seconds) to aim the bar for a given input lag: the best lead in replays was 0.4 at 50 ms
-    of lag and about 1.0 at 175 ms (analysis/sim_friend.py). A lag under ~90 ms leaves the default alone."""
+    of lag and about 1.0 at 175 ms. A lag under ~90 ms leaves the default alone."""
     if lag is None or lag <= 0.09:
         return DEFAULT_LEAD
     return min(1.3, max(DEFAULT_LEAD, 0.4 + 4.5 * (lag - 0.05)))
-
-
-def plan_hold(fish, fish_v, c, v, width, physics, horizon=0.6, dt=0.025, last=None):
-    """Look ahead `horizon` seconds and pick hold/release now.
-    Tries every plan of the form 'do X for k steps, then the opposite' (the best
-    plan for a push/pull bar like this switches at most once in a short window),
-    simulates the bar with the fitted physics and the input delay, predicts the
-    fish from its recent speed, and keeps the plan that keeps the fish deepest
-    inside the zone. Returns True to hold E."""
-    a_hold, a_rel, drag, lag, lo, hi = physics
-    steps = max(2, int(horizon / dt))
-    lag_steps = int(round(lag / dt))
-    half = width / 2
-    margin = 0.2 * width  # aim to keep the fish this far from the zone's edges
-    best_cost, best_first = None, fish > c
-    for first in (True, False):
-        for k in range(steps + 1):
-            cc, vv, cost = c, v, 0.0
-            for i in range(steps):
-                # inputs already sent are still arriving for the first `lag` steps
-                if i < lag_steps and last is not None:
-                    h = last
-                else:
-                    j = i - lag_steps
-                    h = first if j < k else not first
-                a = (a_hold if h else -a_rel) + drag * vv
-                vv += a * dt
-                cc += vv * dt
-                if cc < lo:
-                    cc, vv = lo, max(vv, 0.0)
-                elif cc > hi:
-                    cc, vv = hi, min(vv, 0.0)
-                # the fish tends to keep sweeping the way it's going
-                f = min(max(fish + fish_v * (i + 1) * dt, lo), hi)
-                err = abs(f - cc)
-                out = err - (half - margin)
-                cost += (out * out if out > 0 else 0.0) + 0.002 * err * err
-            if best_cost is None or cost < best_cost:
-                # k == 0 means the switch happens right away, so "now" is the opposite
-                best_cost, best_first = cost, first if k > 0 else not first
-    return best_first
 
 
 class Reeler:
@@ -165,7 +124,7 @@ class Reeler:
         vr = self.v - self.fish_v
         brake = (A_RELEASE if vr > 0 else A_HOLD) * s
         # fewer looks per second means the hold/release is acted on later and lasts longer: aim further
-        # ahead then (replays in analysis/sim_lowfps.py; nothing changes at 50 looks/s or more)
+        # ahead then (found in offline replays; nothing changes at 50 looks/s or more)
         lead = self.lead + SLOW_LEAD * max(0.0, self.T - FAST_LOOK)
         return self.fish - c > vr * lead + vr * abs(vr) / (2 * brake)
 

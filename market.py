@@ -1,6 +1,6 @@
-﻿"""Getting to the Card Market at Spawn.
+"""Getting to the Card Market at Spawn.
 
-Teleport to Spawn, then replay River's recorded key presses exactly (ROUTE), and
+Teleport to Spawn, then replay the author's recorded key presses exactly (ROUTE), and
 press E at the "Open Market" prompt. The camera is never moved anywhere in the bot,
 so W/A/S/D always point the same way and the recorded walk works as recorded.
 
@@ -17,21 +17,13 @@ from game import HERE
 from ocr import read_words
 from packs import close_any_menu, close_popup, teleport
 
-# River's recording (recordings/20261030-221958), from Spawn with the default camera:
+# The author's recording (recordings/20261030-221958), from Spawn with the default camera:
 # (keys held, seconds held, pause after). Replayed exactly as recorded.
 ROUTE = [("aw", 2.356, 0), ("w", 0.200, 0), ("a", 1.532, 0),
          ("aw", 0.754, 0), ("w", 0.400, 0)]
 
 
 LEG_PAUSE = 0.08  # seconds between legs (the recording had 0.5-2.2s of idle between them)
-
-
-def _hold(game, keys, seconds):
-    for k in keys:
-        game.key(k, True)
-    time.sleep(seconds)
-    for k in keys:
-        game.key(k, False)
 
 
 _game = None
@@ -55,9 +47,9 @@ def market_open(img):
 
 def walk_route(game, until_prompt=True):
     """Replay the route, but only as far as needed: the "Open Market" prompt shows up
-    well before the recorded walk ends (the last legs are just River shuffling along
+    well before the recorded walk ends (the last legs are just the author shuffling along
     the stall), so the walk stops the moment it's on screen. The recorded pauses between
-    legs were River's, not the game's, so they're cut to a short beat.
+    legs were the author's, not the game's, so they're cut to a short beat.
     True if it stopped because the prompt appeared."""
     def seen():
         return until_prompt and prompt_position(game.frame(), game) is not None

@@ -10,9 +10,6 @@ import numpy as np
 from game import HERE, TEMPLATES
 from ocr import read_text, read_words
 
-# Rarest first; the bot works down this list during the pack hour
-PRIORITY = ["iced", "radiation", "kawaii", "glitched", "acid", "tsunami", "storm", "volcano",
-            "underground", "halloween", "rainbow", "diamond", "gold", "silver", "bronze", "basic"]
 EVENT_PACKS = ["blood_moon", "eclipse", "volcano", "acid", "tsunami", "storm", "meteor"]
 # The nightly pack session: Rainbow and rarer, plus every event pack, rarest first.
 # (Basic, Bronze, Silver, Gold and Diamond are left alone.)
@@ -26,7 +23,6 @@ GREY_TEMPLATES = {"atlantis", "blood_moon", "eclipse", "meteor"}
 NAME_THRESHOLD = 0.85
 MAX_OPENS_PER_VISIT = 20
 REVEALS_DIR = os.path.join(HERE, "reveals")
-REVEAL_CARDS = (0.2, 0.28, 0.8, 0.76)  # where the cards sit on a pack reveal (below its big title, above Continue)
 NUMBER1_THRESHOLD = 0.8
 RARITY_THRESHOLD = 0.7  # real labels score 0.74+ at reveal size; normal cards stay under 0.6
 
@@ -378,7 +374,6 @@ class Packs:
         btn = g.find("open_button", img, threshold=0.75, region=region)
         return ((btn[0], btn[1]) if btn else None), True
 
-
     def _learn_last_label(self, img, pack):
         """No picture of 'last: Eclipse Pack' exists yet. Save the auto-roll label from
         the first Eclipse reveal so it can be cut into one later."""
@@ -537,12 +532,6 @@ class Packs:
         finally:
             self.close_menu()
 
-    def open_by_priority(self, should_stop):
-        for pack in PRIORITY:
-            if should_stop():
-                return
-            self.open_pack(pack, should_stop)
-
 
 def _find_place(game, img, place):
     """Center of the word `place` in the Teleport list, read with OCR, or None.
@@ -606,14 +595,6 @@ def teleport(game, place, settle=1.5, poll=0.5):
                 game.wait(0.8)
     print(f"Couldn't teleport to {place}.")
     return False
-
-
-def _thumb(img):
-    """Small grayscale copy of the world view (without the side menus) for
-    'did the view change' checks."""
-    h, w = img.shape[:2]
-    mid = img[int(h * 0.1):int(h * 0.85), int(w * 0.1):int(w * 0.6)]
-    return cv2.cvtColor(cv2.resize(mid, (64, 48)), cv2.COLOR_BGR2GRAY).astype(int)
 
 
 def teleport_to_fishing(game):

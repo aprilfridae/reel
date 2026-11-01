@@ -38,8 +38,8 @@ def start_website(port):
 
 def selftest():
     """--selftest: check that the pieces a packaged copy needs work (text reading, the
-    button pictures, screen capture libraries) without touching the game."""
-    import os
+    button pictures, screen capture libraries) without touching the game. Exit code 1 if any don't."""
+    import importlib.util
 
     import cv2
     import numpy as np
@@ -50,11 +50,13 @@ def selftest():
     img = np.full((120, 500, 3), 255, np.uint8)
     cv2.putText(img, "Rebirths: 120", (10, 80), cv2.FONT_HERSHEY_SIMPLEX, 2, (0, 0, 0), 4)
     text = read_text(img)
-    print("text reading:", "OK" if "120" in text else f"FAILED (read {text!r})")
+    ok_text = "120" in text
+    print("text reading:", "OK" if ok_text else f"FAILED (read {text!r})")
     n = len([f for f in os.listdir(TEMPLATES) if f.endswith(".png")])
     print(f"button pictures: {n} found", "(OK)" if n > 30 else "(FAILED)")
-    import importlib.util
-    print("screen capture library:", "OK" if importlib.util.find_spec("dxcam") else "MISSING")
+    ok_capture = importlib.util.find_spec("dxcam") is not None
+    print("screen capture library:", "OK" if ok_capture else "MISSING")
+    return 0 if ok_text and n > 30 and ok_capture else 1
 
 
 def main():
@@ -77,5 +79,6 @@ def main():
 
 
 if __name__ == "__main__":
+    import sys
     multiprocessing.freeze_support()
-    main()
+    sys.exit(main() or 0)

@@ -19,4 +19,8 @@ serial_glyphs/
 *.png
 !templates/*.png
 
-diag_webhook.txt
+# development, kept on this PC only (the bot PC's login and SSH set-up)
+tools/botpc.txt
+tools/setup-ssh.ps1
+# the Python used to build the .exe
+venv312/

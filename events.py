@@ -110,19 +110,6 @@ class EventWatcher:
         """The current event's pack (only while an event is running)."""
         return event_pack(self.name) if self.active else None
 
-    @property
-    def next_pack(self):
-        return event_pack(self.name) if self.state == "next" else None
-
-    def starts_within(self, seconds, pack=None):
-        """True if the next event (optionally a specific one) starts within `seconds`.
-        Accounts for time passed since the banner was read."""
-        if self.state != "next" or self.seconds is None:
-            return False
-        if pack and self.next_pack != pack:
-            return False
-        return self.seconds - (time.time() - self.read_at) <= seconds
-
     # ----- auto-roll label -----
     def update_label(self, img, defer=False):
         """Re-read the 'last: X Pack' label, but only when its pixels changed.

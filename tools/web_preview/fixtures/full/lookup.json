@@ -1,0 +1,23 @@
+{
+ "at": "2026-10-31 14:20",
+ "artist": "luna",
+ "rarity": "mythic",
+ "exist": 40,
+ "rows": [
+  {
+   "serial": 1,
+   "name": "ownerOne",
+   "join": true
+  },
+  {
+   "serial": 2,
+   "name": "ownerTwo",
+   "join": false
+  },
+  {
+   "serial": 4,
+   "name": "ownerFour",
+   "join": true
+  }
+ ]
+}

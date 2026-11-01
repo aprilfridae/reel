@@ -1,0 +1,38 @@
+{
+ "at": "2026-10-31 14:30",
+ "selling": 1,
+ "winning": 1,
+ "total": "26.4K",
+ "requests": 3,
+ "items": [
+  {
+   "kind": "bid",
+   "status": "winning",
+   "serial": "1",
+   "name": "lunaFan",
+   "amount": "700B",
+   "image": "mine1.jpg",
+   "time_left": "2h 5m",
+   "ends_in": 7500
+  },
+  {
+   "kind": "bid",
+   "status": "outbid",
+   "serial": "2",
+   "name": "starDust",
+   "amount": "300B",
+   "image": "mine2.jpg",
+   "time_left": "40m",
+   "ends_in": 2400
+  },
+  {
+   "kind": "listing",
+   "serial": "5",
+   "name": "me",
+   "amount": "1.2T",
+   "image": "mine3.jpg",
+   "time_left": "12h",
+   "ends_in": 43200
+  }
+ ]
+}

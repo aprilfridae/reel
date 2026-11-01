@@ -23,7 +23,7 @@ import numpy as np
 import ones
 from game import HERE, StopBot, Game
 from ocr import read_words
-from packs import close_any_menu, close_popup, number_one_hits
+from packs import close_any_menu, close_popup
 
 RECORDS_DIR = os.path.join(HERE, "number1s")
 
@@ -47,11 +47,6 @@ GRID_BOTTOM = 360
 GRID_TOP = {True: -154, False: -199}  # with / without sub-tabs
 INDEX_BELOW_PACKS = 68  # the Index button sits this far below the Packs button
 MAX_PAGES = 6  # scroll positions looked at per tab (10 cards fit on screen at once)
-
-
-def count_number_ones(img):
-    """Number of rainbow #1 badges on screen (gold #2 / bronze #3 don't count)."""
-    return len(number_one_hits(img))
 
 
 def is_excluded(name):

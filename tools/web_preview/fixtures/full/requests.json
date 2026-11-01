@@ -1,0 +1,61 @@
+[
+ {
+  "id": "r1",
+  "kind": "bid",
+  "status": "done",
+  "amount": "700B",
+  "asked_at": "2026-10-31 14:10:05",
+  "result": "bid placed",
+  "card": {
+   "serial": "1",
+   "seller": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "name": "lunaFan",
+   "image": "card1.jpg"
+  }
+ },
+ {
+  "id": "r2",
+  "kind": "buy",
+  "status": "waiting",
+  "asked_at": "2026-10-31 14:31:40",
+  "card": {
+   "serial": "2",
+   "seller": "fisher_two",
+   "name": "lunaFan",
+   "image": "card1.jpg"
+  }
+ },
+ {
+  "id": "r3",
+  "kind": "lookup",
+  "status": "working",
+  "asked_at": "2026-10-31 14:31:50",
+  "card": {
+   "artist": "luna",
+   "rarity": "mythic",
+   "find": 3
+  }
+ },
+ {
+  "id": "r4",
+  "kind": "join",
+  "status": "failed",
+  "asked_at": "2026-10-31 14:25:00",
+  "result": "could not find the server",
+  "card": {
+   "artist": "luna",
+   "rarity": "mythic",
+   "serial": 4,
+   "name": "ownerFour"
+  }
+ },
+ {
+  "id": "r5",
+  "kind": "rebirth",
+  "status": "done",
+  "amount": "2",
+  "asked_at": "2026-10-31 13:50:00",
+  "result": "reborn x2",
+  "card": {}
+ }
+]

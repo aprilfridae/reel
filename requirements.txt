@@ -1,8 +1,10 @@
-numpy
-opencv-python
+# numpy 1.26 with Python 3.12 keeps the built .exe working on older / weaker PCs
+numpy==1.26.4
+opencv-python==4.9.0.80
 flask
 dxcam
 comtypes
+tzdata
 winrt-runtime
 winrt-Windows.Foundation
 winrt-Windows.Foundation.Collections

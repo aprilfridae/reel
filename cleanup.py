@@ -20,7 +20,6 @@ RULES = [
     ("serial_glyphs", "*.png", 200, 14),  # badge digits the market reader didn't know
     ("reveals", "*.png", 100, 14),  # event pack reveals with Blood / Eclipse cards
     ("number1s", "*.png", 60, 14),  # Index screenshots of #1s
-    ("meteor_debug", "*.jpg", 50, 3),
     ("trade_digits", "*.png", 400, None),  # digits learned from the trade window (small)
     (os.path.join("web", "static", "packs"), "*.jpg", 150, 7),  # pack reveal pictures for the pack log
     (os.path.join("web", "static", "cards"), "*.jpg", 120, 3),  # market card pictures

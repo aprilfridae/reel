@@ -1,5 +1,6 @@
 """Builds templates/trade_digits/ (the bank trade_badges.py matches digits against) from screenshots of the
-trade window whose badge numbers were read by eye. Usage: python analysis/build_trade_digits.py [--test]"""
+trade window whose badge numbers were read by eye. Usage: python tools/build_trade_digits.py [--test]
+(the screenshots below were taken for this and are not kept in the project: take new ones to rebuild)"""
 import os
 import shutil
 import sys

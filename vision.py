@@ -9,8 +9,7 @@ from paths import RES
 # Where the fishing panel lives, in UI pixels (at UI scale 1) measured from the
 # bottom-center of the window. Roblox keeps the panel anchored there.
 PANEL_HALF_WIDTH = 360
-TRACK_HALF_WIDTH = 212  # the reel track, measured on Angie's screen (track edges ±214)
-PANEL_X = None  # (kept for old analysis scripts)
+TRACK_HALF_WIDTH = 212  # the reel track, measured on a test PC (track edges ±214)
 PANEL_FROM_BOTTOM = (620, 160)
 
 _STOP = cv2.imread(os.path.join(RES, "templates", "stop_button.png"), cv2.IMREAD_GRAYSCALE)
@@ -50,7 +49,6 @@ def _has_reel_button(img, scale):
 
 STRIP_ROWS = (385, 200)  # all a reel needs of the panel (Stop button, track, blue button), rows from the bottom
 STRIP_HALF = 220  # ...and its half width: the track is +-212 and the Stop button ends at +218 (UI pixels)
-REEL_ROWS = STRIP_ROWS  # (old name)
 
 
 def detect(img, scale=1.0, rows=PANEL_FROM_BOTTOM, reeling=False, half=PANEL_HALF_WIDTH):
@@ -137,5 +135,3 @@ def detect(img, scale=1.0, rows=PANEL_FROM_BOTTOM, reeling=False, half=PANEL_HAL
     if len(fcols) > 3 * scale:
         out["fish"] = float(np.median(fcols)) + shift
     return out
-
-

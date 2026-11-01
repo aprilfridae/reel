@@ -37,7 +37,6 @@ user32.GetClassNameW.argtypes = [wt.HWND, wt.LPWSTR, ctypes.c_int]
 from paths import APP as HERE, RES  # noqa: E402  (HERE: where we write; RES: bundled pictures)
 TEMPLATES = os.path.join(RES, "templates")
 STOP_FILE = os.path.join(HERE, "stop.flag")
-REF_HEIGHT = 1369  # window height the templates were cut at
 
 VK_F8 = 0x77
 MENU_CLOSE_BUTTONS = ("close_menu", "close_market", "close_daily", "close_gifts")
@@ -301,7 +300,6 @@ def _mouse(flags, dx=0, dy=0, data=0):
 
 
 MOUSE_MOVE, MOUSE_DOWN, MOUSE_UP, MOUSE_WHEEL = 0x0001, 0x0002, 0x0004, 0x0800
-MOUSE_RIGHT_DOWN, MOUSE_RIGHT_UP = 0x0008, 0x0010
 
 
 # ---------- the game ----------
@@ -501,14 +499,6 @@ class Game:
         user32.GetClientRect(self.hwnd, ctypes.byref(r))
         self._move_to(r.right * 0.3, r.bottom * 0.3)
 
-    # The camera is NEVER moved: recorded walks (market.ROUTE) only work if the camera
-    # stays exactly where the game put it. So there is no right-drag anywhere, and the
-    # mouse wheel is only used when a menu is open (over the world it would zoom).
-    def drag_camera(self, *_, **__):
-        raise RuntimeError("camera moves are disabled")
-
-    turn_camera = drag_camera
-
     def menu_open(self, img=None):
         """True if a menu with a red X (Packs, Card Market, Gifts, Daily...) is showing."""
         img = self.frame() if img is None else img
@@ -622,13 +612,3 @@ class Game:
             return None
         hits = self.find_all(name, img, threshold, region, color_check, white_text)
         return hits[0] if hits else None
-
-    def click_when_visible(self, name, timeout=5.0, threshold=0.8, white_text=False):
-        end = time.time() + timeout
-        while time.time() < end:
-            hit = self.find(name, self.frame(), threshold, white_text=white_text)
-            if hit:
-                self.click(hit[0], hit[1])
-                return True
-            time.sleep(0.2)
-        return False

@@ -3,7 +3,7 @@
 Windows OCR reads 3-4 digit badges but misses most 1-2 digit ones, and #1-#9 sit on gold or rainbow badges
 with dark lettering. The badge font is bold with touching characters, all about the same width, so the
 lettering is cut into equal slots (the number of characters follows from its width) and each slot is matched
-against a bank of labelled ones (templates/trade_digits/<char>_<n>.png, made by analysis/build_trade_digits.py).
+against a bank of labelled ones (templates/trade_digits/<char>_<n>.png, made by tools/build_trade_digits.py).
 """
 import glob
 import os
