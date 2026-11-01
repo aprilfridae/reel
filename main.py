@@ -7,11 +7,18 @@
 Settings live in config.json next to the program (written with the defaults on first run).
 F8 (or creating stop.flag) stops the bot.
 """
-import multiprocessing
-import socket
-import threading
+import os
 
-import config
+# numpy's OpenBLAS can fail to start ("DLL initialization routine failed") on some PCs;
+# one thread is plenty for this program and avoids it. Must be set before numpy loads.
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+
+import multiprocessing  # noqa: E402
+import socket  # noqa: E402
+import threading  # noqa: E402
+
+import config  # noqa: E402
 
 
 def lan_address():
