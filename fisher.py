@@ -35,28 +35,38 @@ def fit_lag(reels, min_frames=15):
     hold delayed by `lag`. About 50 ms on Angie's PC and 175 ms on a PC with a slower link to the game
     (analysis/fit_physics.py). None if there isn't enough to go on."""
     import numpy as np
+    hz = 50.0
+    rs = []
+    for t, c, hold in reels:
+        if len(t) < min_frames:
+            continue
+        t, c, hold = np.asarray(t, float), np.asarray(c, float), np.asarray(hold, float)
+        tt = np.arange(t[0], t[-1], 1 / hz)
+        if len(tt) < 20:
+            continue
+        # every reel is resampled to 50 Hz and smoothed, so the fit means the same at 25 or 100 looks a second
+        # (differentiating raw whole-pixel positions at 90 looks/s is mostly noise: it fitted 0 ms for a 200 ms PC)
+        cs = np.convolve(np.pad(np.interp(tt, t, c), 2, mode="edge"), np.ones(5) / 5, mode="valid")
+        hh = hold[np.clip(np.searchsorted(t, tt, side="right") - 1, 0, None)]
+        v = (cs[4:] - cs[:-4]) * hz / 4  # velocity over 80 ms
+        a = (v[4:] - v[:-4]) * hz / 4
+        rs.append((hh, v, a))
+    if sum(len(a) for _, _, a in rs) < 150:
+        return None
     best = None
-    for lag in np.arange(0.0, 0.401, 0.025):
+    for lag_i in range(0, 13):  # 0 to 240 ms in 20 ms steps
         X, y = [], []
-        for t, c, hold in reels:
-            if len(t) < min_frames:
-                continue
-            t, c, hold = np.asarray(t, float), np.asarray(c, float), np.asarray(hold, float)
-            v = np.gradient(c, t)
-            a = np.convolve(np.gradient(v, t), np.ones(3) / 3, mode="same")
-            vs = np.convolve(v, np.ones(3) / 3, mode="same")
-            idx = np.clip(np.searchsorted(t, t - lag, side="right") - 1, 0, None)
-            h = hold[idx]
-            for i in np.where((t - lag) >= t[0])[0][2:-2]:
-                X.append([h[i], 1 - h[i], vs[i]])
-                y.append(a[i])
-        if len(y) < 80:
-            return None
-        X, y = np.array(X), np.array(y)
+        for hh, v, a in rs:
+            n = len(a)
+            hi = np.arange(n) + 6 - lag_i  # the hold that acted on the frame this acceleration is centred on
+            ok = hi >= 0
+            X.append(np.c_[hh[hi[ok]], 1 - hh[hi[ok]], v[2:2 + n][ok]])
+            y.append(a[ok])
+        X, y = np.vstack(X), np.concatenate(y)
         coef = np.linalg.lstsq(X, y, rcond=None)[0]
         err = float(np.mean((X @ coef - y) ** 2))
         if best is None or err < best[0]:
-            best = (err, float(lag))
+            best = (err, lag_i / hz)
     return best[1]
 
 
