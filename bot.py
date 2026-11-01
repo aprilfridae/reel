@@ -92,7 +92,8 @@ def main():
                          f"fullscreen {window_is_fullscreen(game.hwnd)}, capture {game.cap.mode}", log=log)
         hook = lambda extra: diagnostics.upload_fishing(  # noqa: E731
             fisher.csv_path, fisher.csv_start, os.path.join(HERE, "reel_sample.jpg"), extra, log=log)
-    fisher = Fisher(game, args.lead, log_path=args.log_reels, on_log_ready=hook)
+    fisher = Fisher(game, args.lead, log_path=args.log_reels, on_log_ready=hook,
+                    settings=lambda: webstate.load("fishing.json", {}))
     packs = Packs(game)
     events = EventWatcher(game)
     chores = gifts.Chores(game, log=log)

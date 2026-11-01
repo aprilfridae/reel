@@ -34,10 +34,11 @@ def _add(entry):
     webstate.update("packlog.json", [], lambda log: (log + [entry])[-KEEP:])
 
 
-def record_open(pack, n, img, ones):
-    """One pack reveal. `ones`: how many #1 badges were found on it; a picture is kept when there are any."""
+def record_open(pack, n, img, ones, others=()):
+    """One pack reveal. `ones`: how many #1 badges were found on it, `others`: the #2-#10 badges ('#3', '#2-9', '#10');
+    a picture is kept when there are any."""
     shot = None
-    if ones:
+    if ones or others:
         try:
             os.makedirs(SHOTS, exist_ok=True)
             shot = f"pk_{int(time.time() * 1000)}.jpg"
@@ -47,7 +48,7 @@ def record_open(pack, n, img, ones):
                 os.remove(os.path.join(SHOTS, old))
         except OSError:
             shot = None
-    _add({"kind": "open", "pack": _human(pack), "ones": int(ones), "shot": shot, "n": n})
+    _add({"kind": "open", "pack": _human(pack), "ones": int(ones), "others": list(others), "shot": shot, "n": n})
 
 
 _COUNT = re.compile(r"\+\s*([\d,]+)\s*packs?", re.I)

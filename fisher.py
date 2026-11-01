@@ -171,7 +171,7 @@ class Reeler:
 
 
 class Fisher:
-    def __init__(self, game, lead=DEFAULT_LEAD, debug=False, log_path=None, on_log_ready=None):
+    def __init__(self, game, lead=DEFAULT_LEAD, debug=False, log_path=None, on_log_ready=None, settings=None):
         self.game = game
         self.reeler = Reeler(lead)
         self.debug = debug
@@ -208,12 +208,43 @@ class Fisher:
         # first reels and sets how far ahead to aim (a saved value is used until then)
         self.auto_lead = lead == DEFAULT_LEAD
         self.cal_frames, self.cal_reels, self.lag = [], [], None
+        self.settings = settings  # the website's fishing settings (fishing.json), read at the start of each reel
+        self.fit_lead = lead  # the aim-ahead the fitted lag asks for
+        self._applied = None
         if self.auto_lead:
             try:
                 saved = json.load(open(CALIB_FILE))
                 self.lag = saved.get("lag")
-                self.reeler.lead = float(saved.get("lead", lead))
+                self.fit_lead = float(saved.get("lead", lead))
             except (OSError, ValueError, TypeError):
+                pass
+        self.apply_settings()
+
+    def apply_settings(self):
+        """The aim-ahead actually used: the fitted one scaled by the website's "ping compensation" (0% = always the
+        default 0.4 s, 100% = as fitted, up to 150%), or a number of seconds typed in by hand."""
+        s = {}
+        try:
+            s = (self.settings() if self.settings else None) or {}
+        except Exception:
+            pass
+        try:
+            if s.get("manual") and s.get("lead") is not None:
+                lead = min(2.0, max(0.1, float(s["lead"])))
+            else:
+                comp = min(1.5, max(0.0, float(s.get("comp", 100)) / 100))
+                lead = DEFAULT_LEAD + (self.fit_lead - DEFAULT_LEAD) * comp
+        except (TypeError, ValueError):
+            lead = self.fit_lead
+        self.reeler.lead = lead
+        shown = (None if self.lag is None else round(self.lag, 3), round(self.fit_lead, 2), round(lead, 2))
+        if shown != self._applied:
+            self._applied = shown
+            try:
+                import webstate
+                webstate.save("fishcal.json", {"lag": shown[0], "fitted": shown[1], "lead": shown[2],
+                                               "at": time.strftime("%H:%M:%S")})
+            except Exception:
                 pass
 
     def _calibrate(self):
@@ -232,9 +263,10 @@ class Fisher:
             return
         self.lag = lag
         lead = lead_for_lag(lag)
-        if abs(lead - self.reeler.lead) > 0.05:
-            print(f"The bar answers E after about {lag * 1000:.0f} ms here: aiming {lead:.2f}s ahead (was {self.reeler.lead:.2f}s)")
-        self.reeler.lead = lead
+        if abs(lead - self.fit_lead) > 0.05:
+            print(f"The bar answers E after about {lag * 1000:.0f} ms here: the fit asks for {lead:.2f}s ahead (was {self.fit_lead:.2f}s)")
+        self.fit_lead = lead
+        self.apply_settings()
         try:
             json.dump({"lag": lag, "lead": lead}, open(CALIB_FILE, "w"))
         except OSError:
@@ -305,6 +337,7 @@ class Fisher:
                         state = "reel"
                         saved_stuck = False
                         self.reeler.reset()
+                        self.apply_settings()  # (the website's setting may have changed since the last reel)
                         reel_t0, reel_frames = now, 0
                     reel_frames += 1
                     if not self.sample_saved and now - reel_t0 > 1.5:

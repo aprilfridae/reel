@@ -26,6 +26,7 @@ GREY_TEMPLATES = {"atlantis", "blood_moon", "eclipse", "meteor"}
 NAME_THRESHOLD = 0.85
 MAX_OPENS_PER_VISIT = 20
 REVEALS_DIR = os.path.join(HERE, "reveals")
+REVEAL_CARDS = (0.2, 0.28, 0.8, 0.76)  # where the cards sit on a pack reveal (below its big title, above Continue)
 NUMBER1_THRESHOLD = 0.8
 RARITY_THRESHOLD = 0.7  # real labels score 0.74+ at reveal size; normal cards stay under 0.6
 
@@ -399,11 +400,15 @@ class Packs:
     @staticmethod
     def _log_reveal_now(img, pack, n):
         try:
+            import badges
             import packlog
             ones = len(number_one_hits(img))
-            packlog.record_open(pack, n, img, ones)
-            if ones:
-                print(f"Pack reveal: {ones} #1 card(s) in a {pack.replace('_', ' ')} pack", flush=True)
+            # the other numbered cards, #2 to #10: gold badges (#2-#9, the digit when it can be read) and silver (#10)
+            others = [badges.label(t, s) for t, _, s in badges.numbered_badges(img, REVEAL_CARDS) if t != "1"]
+            packlog.record_open(pack, n, img, ones, others)
+            if ones or others:
+                print(f"Pack reveal: {('#1 x' + str(ones) + ' ') if ones else ''}{' '.join(others)} in a "
+                      f"{pack.replace('_', ' ')} pack", flush=True)
         except Exception as e:
             print(f"(couldn't log a pack reveal: {type(e).__name__}: {e})", flush=True)
 

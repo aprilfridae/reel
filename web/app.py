@@ -125,6 +125,7 @@ def state():
         "bids_seen": webstate.load("bids_seen.json", {}),
         "trade": {**webstate.load("trade.json", {}), "cmds": webstate.load("trade_cmd.json", [])[-8:]},
         "packlog": {"log": webstate.load("packlog.json", [])[-80:], "roll": webstate.load("packroll.json", {})},
+        "fishing": {**webstate.load("fishcal.json", {}), "settings": webstate.load("fishing.json", {})},
         "now": time.time(),  # so the page's countdowns use this PC's clock
     })
 
@@ -253,6 +254,25 @@ def trade_cmd():
          "at": time.strftime("%H:%M:%S")}
     webstate.update("trade_cmd.json", [], lambda cs: (cs + [c])[-40:])
     return jsonify(c)
+
+
+@app.post("/api/fishing")
+def set_fishing():
+    """Ping compensation: comp (0-150 %: how much of the measured bar delay the aim-ahead allows for) or, with
+    manual on, the aim-ahead itself in seconds. Takes effect from the next reel."""
+    body = request.get_json(force=True)
+    change = {}
+    try:
+        if "comp" in body:
+            change["comp"] = min(150, max(0, int(float(body["comp"]))))
+        if "manual" in body:
+            change["manual"] = bool(body["manual"])
+        if "lead" in body:
+            change["lead"] = round(min(2.0, max(0.1, float(body["lead"]))), 2)
+    except (TypeError, ValueError):
+        return jsonify(error="those must be numbers"), 400
+    webstate.update("fishing.json", {}, lambda s: {**s, **change})
+    return jsonify(ok=True, **change)
 
 
 @app.post("/api/rebirth")

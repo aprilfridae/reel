@@ -243,6 +243,9 @@
   .owner .nj { color: var(--dim); font-size: 12px; }
   .owner button { height: 32px; font-size: 12px; }
 
+  .fishset { display: grid; gap: 12px; margin-top: 8px; }
+  .fishset .range { display: grid; gap: 6px; }
+  .fishset input[type=range] { width: 100%; accent-color: var(--fg); }
   /* pack log */
   #packs-body { display: grid; gap: 16px; }
   .pstats { display: flex; flex-wrap: wrap; gap: 12px 32px; align-items: baseline; }
@@ -415,7 +418,7 @@
       <div id="ones-body"></div>
     </section>
     <section class="sec panel" id="packs">
-      <header class="sec-head"><span class="eyebrow">pack log</span><h2>packs &amp; #1s, live</h2><span class="meta" id="packs-at"></span></header>
+      <header class="sec-head"><span class="eyebrow">pack log</span><h2>packs &amp; numbered cards, live</h2><span class="meta" id="packs-at"></span></header>
       <div id="packs-body"></div>
     </section>
     <section class="sec panel" id="trade">
@@ -635,17 +638,18 @@ $("packs-body").innerHTML = `<div class="pstats" id="packs-stats"></div><div cla
 function renderPacks(s) {
   const pl = s.packlog || {}, log = (pl.log || []).slice().reverse(), roll = pl.roll || {};
   const today = new Date(); const start = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime() / 1000;
-  const opens = log.filter(e => e.kind === "open" && e.ts >= start), ones = opens.reduce((a, e) => a + (e.ones || 0), 0);
+  const opens = log.filter(e => e.kind === "open" && e.ts >= start), ones = opens.reduce((a, e) => a + (e.ones || 0) + (e.others || []).length, 0);
   $("nav-packs-count").textContent = ones ? String(ones) : "";
   $("packs-at").textContent = roll.at ? `rolling since ${roll.since} · read ${roll.at}` : "";
   setHtml($("packs-stats"), `<div><span class="eyebrow">opened today</span><b>${opens.length}</b></div>
-    <div><span class="eyebrow">#1 cards from reveals</span><b>${ones}</b></div>
+    <div><span class="eyebrow">numbered cards (#1-#10) from reveals</span><b>${ones}</b></div>
     <div><span class="eyebrow">auto-rolled this run</span><b>${roll.rolled != null ? Number(roll.rolled).toLocaleString() : "?"}</b>${roll.last ? `<span class="dim">last: ${esc(roll.last)}</span>` : ""}</div>`);
   const kinds = Object.entries(roll.by_kind || {}).sort((a, b) => b[1] - a[1]).slice(0, 12);
   setHtml($("packs-roll"), kinds.map(([k, n]) => `<span>${esc(k.replace(/_/g, " "))} ${n}</span>`).join(""));
-  setHtml($("packs-log"), log.length ? log.map(e => `<div class="prow ${e.ones ? "hit" : ""}"><span class="t">${esc(e.time)}</span><span class="k">${e.kind === "open" ? "opened" : "rolled"}</span>
-      <span>${esc(e.pack)}${e.kind === "roll" && e.n > 1 ? ` ×${e.n}` : ""}</span><span class="ones">${e.ones ? "#1 ×" + e.ones : ""}</span>
-      ${e.shot ? `<img src="/static/packs/${esc(e.shot)}" alt="the reveal with a #1 card" loading="lazy">` : ""}</div>`).join("")
+  const numbered = (e) => [e.ones ? "#1" + (e.ones > 1 ? " ×" + e.ones : "") : "", ...(e.others || [])].filter(Boolean).join("  ");
+  setHtml($("packs-log"), log.length ? log.map(e => `<div class="prow ${e.ones || (e.others || []).length ? "hit" : ""}"><span class="t">${esc(e.time)}</span><span class="k">${e.kind === "open" ? "opened" : "rolled"}</span>
+      <span>${esc(e.pack)}${e.kind === "roll" && e.n > 1 ? ` ×${e.n}` : ""}</span><span class="ones">${esc(numbered(e))}</span>
+      ${e.shot ? `<img src="/static/packs/${esc(e.shot)}" alt="the reveal with a numbered card" loading="lazy">` : ""}</div>`).join("")
     : `<div class="empty">nothing yet. packs the bot opens, and the rarer ones it rolls, show up here as they happen.</div>`);
 }
 
@@ -774,8 +778,41 @@ $("controls-body").innerHTML = `<div class="modes" role="radiogroup" aria-label=
     `<button class="mode" data-mode="${k}" role="radio" aria-checked="false">${icon(ic)}<span class="mtxt"><b>${name}</b><span>${desc}</span></span><span class="radio"></span></button>`).join("")}</div>
   <div id="mode-note"></div>
   <div class="eyebrow">one-time actions</div>
-  <div class="once"><button data-do="packs">${icon("box")}<span>open packs now</span></button><button data-do="index">${icon("crown")}<span>record #1s now</span></button></div>`;
+  <div class="once"><button data-do="packs">${icon("box")}<span>open packs now</span></button><button data-do="index">${icon("crown")}<span>record #1s now</span></button></div>
+  <div class="eyebrow" style="margin-top:16px">ping compensation (fishing)</div>
+  <div class="fishset">
+    <label class="range"><span>how much of the measured delay to allow for: <b id="fs-comp-val">100%</b></span>
+      <input type="range" id="fs-comp" min="0" max="150" step="5" value="100"></label>
+    <label class="switch"><span>set the aim-ahead by hand</span><input type="checkbox" id="fs-manual"><span class="track"></span></label>
+    <label class="range" id="fs-lead-row"><span>aim-ahead: <b id="fs-lead-val">0.40 s</b></span>
+      <input type="range" id="fs-lead" min="0.1" max="1.5" step="0.05" value="0.4"></label>
+    <div class="eyebrow" id="fs-note"></div>
+  </div>`;
+$("controls-body").insertAdjacentHTML("beforeend", "");
+let fsBusy = 0;  // while a slider is being dragged the page doesn't overwrite it
+async function fishingSet(body) {
+  fsBusy = Date.now() + 1500;
+  try { await fetch("/api/fishing", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)}); } catch {}
+}
+let fsTimer = null;
+const fsSend = (body) => { clearTimeout(fsTimer); fsTimer = setTimeout(() => fishingSet(body), 250); };
+$("fs-comp").addEventListener("input", (e) => { $("fs-comp-val").textContent = e.target.value + "%"; fsSend({comp: +e.target.value}); });
+$("fs-lead").addEventListener("input", (e) => { $("fs-lead-val").textContent = (+e.target.value).toFixed(2) + " s"; fsSend({lead: +e.target.value}); });
+$("fs-manual").addEventListener("change", (e) => { $("fs-lead-row").style.opacity = e.target.checked ? 1 : .45; fishingSet({manual: e.target.checked, lead: +$("fs-lead").value}); });
+function renderFishing(s) {
+  const f = s.fishing || {}, st = f.settings || {};
+  if (Date.now() > fsBusy) {
+    $("fs-comp").value = st.comp ?? 100; $("fs-comp-val").textContent = (st.comp ?? 100) + "%";
+    $("fs-manual").checked = !!st.manual;
+    $("fs-lead").value = st.lead ?? f.lead ?? 0.4; $("fs-lead-val").textContent = (+($("fs-lead").value)).toFixed(2) + " s";
+    $("fs-lead-row").style.opacity = st.manual ? 1 : .45;
+  }
+  $("fs-comp").disabled = !!st.manual;
+  $("fs-note").textContent = f.lead == null ? "not measured yet: it fits the bar's delay from the first reels of each run"
+    : `measured bar delay ${f.lag == null ? "?" : Math.round(f.lag * 1000) + " ms"} · fitted aim-ahead ${(+f.fitted).toFixed(2)} s · in use ${(+f.lead).toFixed(2)} s (from the next reel)`;
+}
 function renderControls(s) {
+  try { renderFishing(s); } catch (e) { console.error(e); }
   const mode = (s.mode && s.mode.mode) || "auto", queued = [].concat((s.mode && s.mode.once) || []);
   document.querySelectorAll("#controls [data-mode]").forEach(b => {
     b.classList.toggle("on", b.dataset.mode === mode);
