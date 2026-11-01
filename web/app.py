@@ -237,7 +237,7 @@ def ask_join():
 
 
 TRADE_CMDS = ("accept", "decline", "send", "refresh", "search", "ready", "cancel", "addwanted", "players",
-              "add", "remove", "coins")
+              "add", "remove", "coins", "want")
 
 
 @app.post("/api/trade/cmd")
@@ -257,8 +257,11 @@ def trade_cmd():
     if cmd == "search":
         args["tab"] = "mine" if body.get("tab") == "mine" else "theirs"
         args["query"] = str(body.get("query", "")).strip()[:30]
-    if cmd in ("add", "remove"):
-        args = {k: str(body.get(k, "")).strip()[:40] for k in ("name", "serial", "rarity")}
+    if cmd in ("add", "remove", "want"):
+        # the card as the website listed it: its place in the game's order and its picture find it on screen
+        args = {k: str(body.get(k, "")).strip()[:40] for k in ("name", "serial", "rarity", "query")}
+        args["rank"] = str(int(body["rank"])) if str(body.get("rank", "")).isdigit() else ""
+        args["img"] = body["img"] if re.fullmatch(r"[0-9a-f]{12}\.jpg", str(body.get("img", ""))) else ""
         if not args["name"]:
             return jsonify(error="which card?"), 400
     if cmd == "coins":

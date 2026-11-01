@@ -764,7 +764,7 @@ $("trade-body").innerHTML = `<div class="trade-req" id="trade-req" hidden></div>
       <div class="trade-row">
         <div class="tabs" role="tablist"><button role="tab" data-ttab="mine" aria-selected="true">my cards <span class="n" id="n-mine"></span></button>
           <button role="tab" data-ttab="theirs" aria-selected="false">their cards <span class="n" id="n-theirs"></span></button></div>
-        <form class="trade-row" id="inv-search" style="flex:1 1 280px"><input id="inv-q" placeholder="filter, or search the whole collection in game" autocomplete="off">
+        <form class="trade-row" id="inv-search" style="flex:1 1 280px"><input id="inv-q" placeholder="search cards (searches the game's whole list)" autocomplete="off">
           <button type="submit">${icon("search")}<span>search in game</span></button></form>
       </div>
       <div class="searchnote" id="inv-note" hidden></div>
@@ -778,27 +778,30 @@ const cardLabel = (c) => `${c.name || "?"} #${c.serial || "?"}`;
 // a card as the game draws it (the bot saves each tile's picture); text when there's no picture
 function tcard(c, opts = {}) {
   const tag = opts.button ? "button" : "div";
-  const data = opts.button ? ` data-${opts.button}="${esc(JSON.stringify({name: c.name, serial: c.serial, rarity: c.rarity}))}"` : "";
+  const data = opts.button ? ` data-${opts.button}="${esc(JSON.stringify({name: c.name, serial: c.serial, rarity: c.rarity,
+    rank: c.rank || "", img: c.img || "", query: opts.query || ""}))}"` : "";
   const cls = ["tc", c.wanted ? "wanted" : "", opts.cls || ""].filter(Boolean).join(" ");
   const meta = [c.rarity, c.grade, c.income ? `+${c.income}/s` : ""].filter(Boolean).join(" · ");
   const title = `${cardLabel(c)}${meta ? " · " + meta : ""}${c.count > 1 ? ` · ×${c.count}` : ""}`;
   return `<${tag} class="${cls}"${data} title="${esc(title)}" ${opts.disabled ? "disabled" : ""}>
     ${c.img ? `<img src="/static/tcards/${esc(c.img)}" alt="${esc(cardLabel(c))}" loading="lazy" onerror="this.remove()">` : ""}
     <div class="tc-fb"><span class="sno ${String(c.serial) === "1" ? "n1" : ""}">#${esc(c.serial || "?")}</span><b>${esc(c.name || "?")}</b><span>${esc(meta)}</span></div>
-    ${c.wanted ? `<span class="tag">wanted</span>` : ""}${opts.act ? `<span class="act">${esc(opts.act)}</span>` : ""}</${tag}>`;
+    ${c.wanted ? `<span class="tag">${esc(opts.tag || "wanted")}</span>` : ""}${opts.act ? `<span class="act">${esc(opts.act)}</span>` : ""}</${tag}>`;
 }
 let tradeData = {};
 let tradeTab = "mine", searchCleared = "";
 const TVERB = {add: "adding the card", remove: "taking the card out", coins: "setting the coins", addwanted: "adding what they want",
-  ready: "pressing ready", cancel: "cancelling", refresh: "reading the cards again", search: "searching in game", accept: "accepting",
+  want: "asking for the card", ready: "pressing ready", cancel: "cancelling", refresh: "reading the cards again", search: "searching in game", accept: "accepting",
   decline: "declining", send: "sending the request", players: "reading the server's players"};
 const tPending = () => (tradeData.cmds || []).filter(c => c.status === "waiting");
-const tBusyKeys = () => new Set(tPending().filter(c => c.cmd === "add" || c.cmd === "remove").map(c => cardKey(c.args || {})));
+const tBusyKeys = () => new Set(tPending().filter(c => ["add", "remove", "want"].includes(c.cmd)).map(c => cardKey(c.args || {})));
 function drawInv() {
   const t = tradeData;
   if (!t.open) return;
-  const s = t.search && t.search.tab === tradeTab && t.search.at !== searchCleared ? t.search : null;
   const q = $("inv-q").value.trim().toLowerCase();
+  // the game's results for what's typed in the box now (an empty box shows the 20 read again)
+  const s = t.search && t.search.tab === tradeTab && t.search.at !== searchCleared
+    && q && (t.search.query || "").toLowerCase() === q ? t.search : null;
   let cards = s ? s.cards : (t[tradeTab] || []);
   if (q && !s) cards = cards.filter(c => `${c.name} ${c.rarity} ${c.grade} #${c.serial}`.toLowerCase().includes(q));
   cards = cards.slice().sort((a, b) => (b.wanted - a.wanted) || (serialKey(a) - serialKey(b)));  // what they want first
@@ -807,10 +810,13 @@ function drawInv() {
   $("inv-note").hidden = !s;
   if (s) setHtml($("inv-note"), `<span>in-game search for “${esc(s.query)}”: ${s.cards.length} found</span><button data-clearsearch>show the top 20 again</button>`);
   $("inv-hint").textContent = tradeTab === "mine" ? "click a card to put it in your offer · lowest serials first, what they want at the front"
-    : `${t.open}'s lowest serials · only they can add their cards, ask in chat`;
-  setHtml($("inv"), cards.length ? cards.map(c => tradeTab !== "mine" ? tcard(c)
+    : `${t.open}'s lowest serials · click a card to ask for it (they see it as wanted; click again to take it back)`;
+  const query = s ? s.query : "";  // a card from in-game search results is found in those same results
+  setHtml($("inv"), cards.length ? cards.map(c => tradeTab !== "mine"
+      ? tcard(c, {button: "twant", tag: "requested", act: c.wanted ? "requested · take back" : "request this card",
+                  cls: busy.has(cardKey(c)) ? "busy" : "", disabled: waiting, query})
       : offered.has(cardKey(c)) ? tcard(c, {button: "tremove", act: "in your offer · take out", cls: "offered", disabled: waiting})
-      : tcard(c, {button: "tadd", act: "add to offer", cls: busy.has(cardKey(c)) ? "busy" : "", disabled: waiting})).join("")
+      : tcard(c, {button: "tadd", act: "add to offer", cls: busy.has(cardKey(c)) ? "busy" : "", disabled: waiting, query})).join("")
     : `<div class="empty">${q ? "none of these match. press search in game to look through every card." : s ? "the game found nothing." : "reading the cards…"}</div>`);
 }
 function readySummary() {
@@ -908,12 +914,20 @@ $("coins-form").addEventListener("submit", (e) => {
   const a = $("coins-amt").value.trim();
   if (a) { tradeCmd({cmd: "coins", amount: a}); $("coins-amt").value = ""; }
 });
-$("inv-search").addEventListener("submit", (e) => {
-  e.preventDefault();
+// typing in the search box searches the game's card list (once typing stops), not just the 20 cards read
+let invTimer = null, invLast = "";
+function invSearch() {
   const q = $("inv-q").value.trim();
-  if (q) tradeCmd({cmd: "search", tab: tradeTab, query: q});
+  if (!q || `${tradeTab}|${q}` === invLast || tPending().some(c => c.cmd === "search")) return;
+  invLast = `${tradeTab}|${q}`;
+  tradeCmd({cmd: "search", tab: tradeTab, query: q});
+}
+$("inv-search").addEventListener("submit", (e) => { e.preventDefault(); invLast = ""; invSearch(); });
+$("inv-q").addEventListener("input", () => {
+  drawInv();  // the cards already read are filtered at once
+  clearTimeout(invTimer);
+  if ($("inv-q").value.trim().length >= 2) invTimer = setTimeout(invSearch, 1200);
 });
-$("inv-q").addEventListener("input", drawInv);
 $("trade-body").addEventListener("click", (e) => {
   const b = e.target.closest("button"); if (!b || b.disabled) return;
   if (b.dataset.tsend) {
@@ -921,13 +935,17 @@ $("trade-body").addEventListener("click", (e) => {
   } else if (b.dataset.ttab) {
     tradeTab = b.dataset.ttab;
     if (window.lastState) renderTrade(window.lastState);
+    if ($("inv-q").value.trim()) invSearch();  // the same search, in the other player's list
   } else if (b.dataset.tadd) {  // one card into my offer (adding is undone by clicking it in the offer)
     tradeCmd({cmd: "add", ...JSON.parse(b.dataset.tadd)});
   } else if (b.dataset.tremove) {
     tradeCmd({cmd: "remove", ...JSON.parse(b.dataset.tremove)});
+  } else if (b.dataset.twant) {  // ask for one of their cards (or take the request back)
+    tradeCmd({cmd: "want", ...JSON.parse(b.dataset.twant)});
   } else if (b.hasAttribute("data-clearsearch")) {
     searchCleared = (tradeData.search || {}).at || "";
     $("inv-q").value = "";
+    invLast = "";
     drawInv();
   } else if (b.dataset.tcmd) {
     const c = b.dataset.tcmd;

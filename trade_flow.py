@@ -197,9 +197,22 @@ class TradeFlow:
             self.read_offers(force=True)
             return bool(added), (f"added {', '.join(added)} to the offer" if added else "no wanted cards found")
         if cmd in ("add", "remove"):
-            card = {k: str(a.get(k, ""))[:40] for k in ("name", "serial", "rarity")}
+            card = {k: str(a.get(k, ""))[:40] for k in ("name", "serial", "rarity", "rank", "img", "query")}
             ok, msg = (trade.add_card if cmd == "add" else trade.remove_card)(g, card, self.log)
             self.read_offers(force=True)
+            self.snapshot()
+            return ok, msg
+        if cmd == "want":  # ask for one of their cards
+            card = {k: str(a.get(k, ""))[:40] for k in ("name", "serial", "rarity", "rank", "img", "query")}
+            ok, msg, now = trade.request_card(g, card, self.log)
+            if now is not None:  # mark it on the website's list (and in a search's results) as asked for or not
+                def mark(t):
+                    for lst in (t.get("theirs") or [], (t.get("search") or {}).get("cards") or []):
+                        for c in lst:
+                            if trade._same_card(c, card):
+                                c["wanted"] = now
+                    return t
+                webstate.update("trade.json", {}, mark)
             self.snapshot()
             return ok, msg
         if cmd == "coins":

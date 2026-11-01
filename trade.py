@@ -198,7 +198,9 @@ def _wanted_label(crop):
     # a solid pill about 40-65 px wide and 12-24 tall (a photo's orange or a picture's gold edges aren't)
     for i in range(1, n):
         x, y, w, h, a = st[i]
-        if 52 <= w <= 66 and 20 <= h <= 27 and a >= 0.75 * w * h:  # the pill is about 59 x 24 px
+        # the pill is about 59 x 24 px; its dark letters leave holes ("ASKED", on their cards I asked for, is
+        # only about 2/3 gold)
+        if 52 <= w <= 66 and 20 <= h <= 27 and a >= 0.6 * w * h:
             return True
     return False
 
@@ -566,28 +568,138 @@ def _squash(s):
     return re.sub(r"[^a-z0-9]", "", s.lower())
 
 
-def add_card(game, card, log=print):
-    """Click one of my cards into my offer: the website names it ({"name", "serial", "rarity"}). The game's
-    search finds it, the tile with the same serial is clicked once. Does not press READY."""
-    show_tab(game, "mine")
-    search_cards(game, card.get("name", "")[:30], log)
-    try:
+def _search_key(name):
+    """What to type into the game's search for a card name read off the screen: the part before the first
+    letter OCR mixes up (I/l/1/|, O/0), since a wrong letter makes the search find nothing ("XHRIS2EAZY" is
+    read "XHRlS2EAZY": "XHR" finds it). At least 3 characters; the serial picks the right tile afterwards."""
+    name = name.strip()
+    m = re.search(r"[Il1|O0]", name)
+    key = name[:m.start()] if m else name
+    return (key if len(key.strip()) >= 3 else name[:3]).strip()[:30]
+
+
+COLS, ROW = 5, 233  # tiles per row; pixels from one row's count badge to the next (1080p, scale 1)
+PIC_MATCH = 22  # mean colour difference (0-255) under which a tile is the card in a saved picture
+
+
+def _tile_sig(img, cx, ay, by, s):
+    """A tile shrunk to compare with a saved picture (the same crop _save_picture saves)."""
+    tile = img[max(0, int(ay - 10 * s)):int(by + 104 * s), max(0, int(cx - 76 * s)):int(cx + 76 * s)]
+    return cv2.resize(tile, (38, 56), interpolation=cv2.INTER_AREA).astype(np.int16) if tile.size else None
+
+
+def _ref_sig(card):
+    name = str(card.get("img") or "")
+    ref = cv2.imread(os.path.join(PICS, name)) if re.fullmatch(r"[0-9a-f]{12}\.jpg", name) else None
+    return cv2.resize(ref, (38, 56), interpolation=cv2.INTER_AREA).astype(np.int16) if ref is not None else None
+
+
+def _pick_tile(game, img, s, card, ref, near=None):
+    """The tile in sight that is this card, read (read_tile), or None. Candidates: tiles that look like its
+    saved picture (or, with no picture, the tile at its place), closest look / place first. The serial must
+    agree too: copies of one card look alike apart from the #1 / #2 badge, and a card asked for moves to the
+    front, so the tile at the card's old place can be its other copy."""
+    _, oy = _origin(img, s)
+    cands = []
+    for ax, ay in _anchors(img, s):
+        cx, by = ax - 63 * s, ay + 112 * s
+        if ay < oy + GRID[1] * s or by + 20 * s > oy + GRID[3] * s:
+            continue  # its picture isn't fully in sight
+        sig = _tile_sig(img, cx, ay, by, s)
+        score = float(np.abs(sig - ref).mean()) if ref is not None and sig is not None else None
+        dist = ((ax - near[0]) ** 2 + (ay - near[1]) ** 2) ** 0.5 if near else 0
+        if score is not None and score >= PIC_MATCH or score is None and dist > 60 * s:
+            continue
+        cands.append((score or 0, dist, ax, ay))
+    for _, _, ax, ay in sorted(cands):
+        t = read_tile(game, img, ax, ay, s)
+        if not card.get("serial") or not t.get("serial") or str(t["serial"]) == str(card["serial"]):
+            return t
+    return None
+
+
+def _click_card(game, tab, card, log=print):
+    """Click one card of a tab of the grid once. Returns the tile as read before the click, or None.
+
+    The website lists the cards in the game's own order, so card["rank"] (its place in that order, 1 = first)
+    says which row to scroll to and which column it's in. The card's saved picture (card["img"]) confirms the
+    tile: a card put in the offer leaves the grid and the ones after it move up a place, so the picture decides
+    among the tiles in sight (with no picture, the tile at the card's place is taken). A card from an in-game
+    search has card["query"]: the same search is typed first, its place is in those results. Last resort: the
+    game's search by name, matched by serial. The search is left in place for a read-back; the caller clears it."""
+    show_tab(game, tab)
+    search_cards(game, str(card.get("query") or ""), log)
+    ref, rank = _ref_sig(card), int(card.get("rank") or 0)
+    if rank:
+        row, col = (rank - 1) // COLS, (rank - 1) % COLS
+        notches = max(0, -(-(240 + row * ROW + 67 - 800) // NOTCH))  # the row's pictures into view
+        scroll_grid(game, 40)
+        if notches:
+            scroll_grid(game, -notches)
         img = game.frame()
         s = _scale(game, img)
+        ox, oy = _origin(img, s)
+        ex, ey = ox + (285 + 63 + col * 164) * s, oy + (240 + row * ROW - notches * NOTCH) * s  # its count badge
+        t = _pick_tile(game, img, s, card, ref, (ex, ey))
+        if not t and ref is not None and notches:  # a card asked for moves to the front: look at the top too
+            scroll_grid(game, 40)
+            img = game.frame()
+            t = _pick_tile(game, img, s, card, ref)
+        if t:
+            game.click(*t["_click"])
+            game.park_mouse()
+            game.wait(0.9)
+            return t
+        log(f"Trade: {card.get('name')} wasn't at place {rank}; looking it up by name")
+    search_cards(game, _search_key(card.get("name", "")), log)
+    img = game.frame()
+    s = _scale(game, img)
+    t = _pick_tile(game, img, s, card, ref) if ref is not None else None
+    if not t:
         _, oy = _origin(img, s)
-        for ax, ay in _anchors(img, s):
-            if ay + 112 * s + 20 * s > oy + GRID[3] * s:
-                continue
-            t = read_tile(game, img, ax, ay, s)
-            if _same_card(t, card):
-                game.click(*t["_click"])
-                game.park_mouse()
-                game.wait(0.9)
-                log(f"Trade: added {t['name']} #{t['serial']} to the offer")
-                return True, f"added {t['name']} #{t['serial']}"
-        return False, f"couldn't find {card.get('name')} #{card.get('serial')} in my cards"
+        t = next((x for x in (read_tile(game, img, ax, ay, s) for ax, ay in _anchors(img, s)
+                              if ay + 132 * s <= oy + GRID[3] * s) if _same_card(x, card)), None)
+    if t:
+        game.click(*t["_click"])
+        game.park_mouse()
+        game.wait(0.9)
+    return t
+
+
+def add_card(game, card, log=print):
+    """Click one of my cards into my offer: the website names it ({"name", "serial", "rarity"}). Does not
+    press READY."""
+    try:
+        t = _click_card(game, "mine", card, log)
+        if not t:
+            return False, f"couldn't find {card.get('name')} #{card.get('serial')} in my cards"
+        log(f"Trade: added {t['name']} #{t['serial']} to the offer")
+        return True, f"added {t['name']} #{t['serial']}"
     finally:
         search_cards(game, "", log)
+
+
+def request_card(game, card, log=print):
+    """Click one of the other player's cards in "Their cards": that asks for it (the game puts a gold WANTED
+    tag on it, on both screens; clicking again takes the request back). Returns (ok, message, wanted now)."""
+    try:
+        t = _click_card(game, "theirs", card, log)
+        if not t:
+            return False, f"couldn't find {card.get('name')} #{card.get('serial')} in their cards", None
+        game.wait(0.4)  # read the tag back, wherever the card is now (one asked for moves to the front)
+        img = game.frame()
+        s = _scale(game, img)
+        again = _pick_tile(game, img, s, {**card, "serial": t.get("serial") or card.get("serial")}, _ref_sig(card))
+        if again:
+            now = again["wanted"]
+        else:  # not found again (no picture to go by): the tag where it was clicked
+            cx, by = t["_click"][0], t["_click"][1] + 45 * s
+            now = _wanted_label(img[int(by - 14 * s):int(by + 14 * s), int(cx - 72 * s):int(cx - 4 * s)])
+        log(f"Trade: {'asked for' if now else 'no longer asking for'} {t['name']} #{t['serial']}")
+        return True, f"{'asked for' if now else 'took back the request for'} {t['name']} #{t['serial']}", now
+    finally:
+        search_cards(game, "", log)
+        show_tab(game, "mine")
 
 
 def remove_card(game, card, log=print):
