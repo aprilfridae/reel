@@ -254,7 +254,7 @@ def restore_window(game):
 
 
 class Chat:
-    def __init__(self, game, every=1.0):
+    def __init__(self, game, every=5.0):  # (a look at the chat every 5 s: a line stays on screen far longer than that)
         self.game = game
         self.every = every
         self.last_read = 0.0
