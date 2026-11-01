@@ -173,6 +173,43 @@ class WindowCapture:
         self.buf = np.empty((h, w, 4), np.uint8)
         self.size = (w, h)
 
+    def grab_region(self, x0, y0, x1, y1):
+        """Only this rectangle of the window (client pixels), copied off the screen, as a full-size
+        picture that is black everywhere else (so positions are the same as in a full frame).
+        For PCs without the fast GPU stream, where a whole frame takes ~100 ms but this tiny part
+        a few. None when it can't be done (stream mode, or the window moved/minimized)."""
+        if self.cam:
+            return None
+        r = wt.RECT()
+        user32.GetClientRect(self.hwnd, ctypes.byref(r))
+        w, h = r.right, r.bottom
+        x0, y0, x1, y1 = max(0, int(x0)), max(0, int(y0)), min(w, int(x1)), min(h, int(y1))
+        cw, ch = x1 - x0, y1 - y0
+        if w < 100 or h < 100 or cw < 8 or ch < 8:
+            return None
+        if getattr(self, "_rsize", None) != (cw, ch):
+            if getattr(self, "_rsize", None):
+                gdi32.DeleteObject(self.rbmp)
+                gdi32.DeleteDC(self.rmem)
+            screen = user32.GetDC(None)
+            self.rmem = gdi32.CreateCompatibleDC(screen)
+            self.rbmp = gdi32.CreateCompatibleBitmap(screen, cw, ch)
+            user32.ReleaseDC(None, screen)
+            gdi32.SelectObject(self.rmem, self.rbmp)
+            self.rinfo = BITMAPINFOHEADER(ctypes.sizeof(BITMAPINFOHEADER), cw, -ch, 1, 32, 0, 0, 0, 0, 0, 0)
+            self.rbuf = np.empty((ch, cw, 4), np.uint8)
+            self._rsize = (cw, ch)
+        if getattr(self, "_canvas", None) is None or self._canvas.shape[:2] != (h, w):
+            self._canvas = np.zeros((h, w, 3), np.uint8)
+        pt = wt.POINT(0, 0)
+        user32.ClientToScreen(self.hwnd, ctypes.byref(pt))
+        screen = user32.GetDC(None)
+        gdi32.BitBlt(self.rmem, 0, 0, cw, ch, screen, pt.x + x0, pt.y + y0, 0x00CC0020)  # SRCCOPY
+        user32.ReleaseDC(None, screen)
+        gdi32.GetDIBits(self.rmem, self.rbmp, 0, ch, self.rbuf.ctypes.data, ctypes.byref(self.rinfo), 0)
+        self._canvas[y0:y1, x0:x1] = self.rbuf[:, :, :3]
+        return self._canvas
+
     def grab(self):
         r = wt.RECT()
         user32.GetClientRect(self.hwnd, ctypes.byref(r))
@@ -328,6 +365,28 @@ class Game:
             print("Can't see Roblox (minimized, or the display is off). Waking the display...")
             self.wake_display()
             time.sleep(2)
+
+    @property
+    def slow_capture(self):
+        """True when frames come from window/screen copies (no GPU stream): about 100 ms a frame on a weak PC."""
+        return not self.cap.cam
+
+    def panel_frame(self, rows_from_bottom, half_width, scale):
+        """A frame holding only the strip around the reel panel (see WindowCapture.grab_region): several
+        times quicker than frame() when there's no GPU stream. Falls back to frame()."""
+        self.check_stop()
+        if not user32.IsWindow(self.hwnd):
+            raise WindowLost()
+        if user32.GetForegroundWindow() != self.hwnd:
+            self.focus()  # reading the screen itself: Roblox has to be in front
+        r = wt.RECT()
+        user32.GetClientRect(self.hwnd, ctypes.byref(r))
+        w, h = r.right, r.bottom
+        img = self.cap.grab_region(w / 2 - half_width * scale, h - rows_from_bottom[0] * scale,
+                                   w / 2 + half_width * scale, h - rows_from_bottom[1] * scale)
+        if img is None or img.max() == 0:
+            return self.frame()
+        return img
 
     def wake_display(self):
         """A one-pixel mouse nudge there and back: any input wakes a sleeping display."""

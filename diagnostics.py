@@ -48,6 +48,19 @@ def send(url, summary, files, timeout=30):
     urllib.request.urlopen(req, timeout=timeout).read()
 
 
+def ping(extra, log=print):
+    """Background: a one-line "started" message, so it's known this PC runs this build and can reach
+    the channel even before any reel has been recorded. Never raises."""
+    def work():
+        try:
+            url = webhook_url()
+            if url:
+                send(url, f"started, UndergroundBot {VERSION}\n{platform.platform()} / {platform.processor()}\n{extra}", [])
+        except Exception as e:
+            log(f"(couldn't reach the diagnostics channel: {type(e).__name__}: {e})")
+    threading.Thread(target=work, daemon=True).start()
+
+
 def upload_fishing(csv_path, csv_start, sample_path, extra="", log=print):
     """Background: this run's rows of the reel log + the sample screenshot. Never raises."""
     def work():
@@ -68,5 +81,5 @@ def upload_fishing(csv_path, csv_start, sample_path, extra="", log=print):
             send(url, summary, files)
             log(f"Sent fishing diagnostics ({', '.join(n for n, _ in files)})")
         except Exception as e:
-            log(f"(couldn't send diagnostics: {type(e).__name__})")
+            log(f"(couldn't send diagnostics: {type(e).__name__}: {e})")
     threading.Thread(target=work, daemon=True).start()

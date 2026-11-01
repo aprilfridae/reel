@@ -11,7 +11,7 @@ import cv2
 
 from game import HERE, Game, StopBot
 from packs import close_popup, dismiss_popup, read_catch_popup
-from vision import detect
+from vision import PANEL_FROM_BOTTOM, PANEL_HALF_WIDTH, REEL_ROWS, detect
 
 # Bar physics fitted from live reels on Angie's PC at 50 fps (px/s^2 at UI scale 1)
 A_HOLD = 1015
@@ -19,7 +19,8 @@ A_RELEASE = 737
 DEFAULT_LEAD = 0.4  # best in replays of real reels (analysis/sim_reels.py)
 CAST_DELAY = 0.3  # seconds the fishing panel must be gone before the first cast press
 RECAST_EVERY = 0.4  # then E is pressed this often until a cast starts (the panel takes ~0.3s to show)
-LOG_FIRST_REELS = 10  # reels of each run written to reel_log.csv
+SLOW_FULL_EVERY = 0.5  # seconds between whole-window frames while fishing without the GPU stream
+LOG_FIRST_REELS = 10 # reels of each run written to reel_log.csv
 FAST_LOOK = 0.02 # seconds between looks (50 a second) the bar controller was tuned at
 SLOW_LEAD = 1.5  # extra lead per second of look time beyond that
 PENDING_WAIT = 20 # seconds act() (opening event packs...) waits for a cast in the water to be caught
@@ -135,6 +136,8 @@ class Fisher:
         self.csv_path = self.csv_start = None
         self.on_log_ready = on_log_ready  # called once, with a summary line, after LOG_FIRST_REELS reels
         self.looks = []
+        self.first_reel_t = None
+        self.grab_ms = 0.0  # smoothed time to get one frame
         if self.csv is None:
             path = os.path.join(HERE, "reel_log.csv")
             try:
@@ -167,14 +170,30 @@ class Fisher:
         pending = False
         pending_since = 0.0
         reel_t0, reel_frames = time.time(), 0
+        scale, last_full = None, 0.0
         try:
             while True:
                 now = time.time()
-                img = game.frame()
-                if watch and not pending and watch(img, state == "reel"):
-                    pending = True
-                    pending_since = now
-                d = detect(img, game.ui_scale(img))
+                # Without the GPU stream a whole frame takes ~100 ms; the strip around the panel is all the
+                # reel needs, and several times quicker. A whole frame is still taken now and then
+                # (for watch: events, chat, coins) while not reeling.
+                panel_only = (game.slow_capture and scale is not None
+                              and (state == "reel" or now - last_full < SLOW_FULL_EVERY))
+                if panel_only:
+                    rows = REEL_ROWS if state == "reel" else PANEL_FROM_BOTTOM
+                    t_grab = time.time()
+                    img = game.panel_frame(rows, PANEL_HALF_WIDTH, scale)
+                else:
+                    rows = PANEL_FROM_BOTTOM
+                    t_grab = time.time()
+                    img = game.frame()
+                    last_full = time.time()
+                    scale = game.ui_scale(img)
+                    if watch and not pending and watch(img, state == "reel"):
+                        pending = True
+                        pending_since = now
+                self.grab_ms = 0.95 * self.grab_ms + 0.05 * (time.time() - t_grab) * 1000
+                d = detect(img, scale if scale is not None else game.ui_scale(img), rows)
                 # act() opens menus: not while a fish is on the line or being reeled (that catch is
                 # finished and its popup closed first), but don't wait more than PENDING_WAIT for it
                 if pending and not d["zone"] and state != "reel" and (not d["busy"] or now - pending_since > PENDING_WAIT):
@@ -237,10 +256,16 @@ class Fisher:
                     self.looks.append(reel_frames / secs)
                     print(f"Reel finished ({self.catches} so far, {reel_frames / secs:.0f} looks/s)"
                           + (", got an Atlantis pack!" if won_pack else ""))
-                    if self.on_log_ready and self.csv_path and self.reel_id == LOG_FIRST_REELS:
+                    if self.first_reel_t is None:
+                        self.first_reel_t = time.time()
+                    # after 10 reels, or (if reels are few) 3 or more and 4 minutes since the first
+                    if self.on_log_ready and self.csv_path and (
+                            self.reel_id >= LOG_FIRST_REELS
+                            or (self.reel_id >= 3 and time.time() - self.first_reel_t > 240)):
                         mid = sorted(self.looks)[len(self.looks) // 2]
                         self.on_log_ready(f"window {img.shape[1]}x{img.shape[0]}, ui scale {game.ui_scale(img):.2f}, "
-                                          f"median {mid:.0f} looks/s, {self.reeler.lead:.2f}s lead")
+                                          f"capture {game.cap.mode}, median {mid:.0f} looks/s, "
+                                          f"frame grab {self.grab_ms:.0f} ms, {self.reeler.lead:.2f}s lead")
                         self.on_log_ready = None
                     if won_pack:
                         close_popup(game)  # (the packs menu is opened next: the popup must be gone)

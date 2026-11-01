@@ -85,6 +85,9 @@ def main():
     hook = None
     if CFG["send_diagnostics"] and diagnostics.webhook_url():
         print(diagnostics.NOTICE, flush=True)
+        _img = game.frame()
+        diagnostics.ping(f"window {_img.shape[1]}x{_img.shape[0]}, ui scale {game.ui_scale(_img):.2f}, "
+                         f"fullscreen {window_is_fullscreen(game.hwnd)}, capture {game.cap.mode}", log=log)
         hook = lambda extra: diagnostics.upload_fishing(  # noqa: E731
             fisher.csv_path, fisher.csv_start, os.path.join(HERE, "reel_sample.jpg"), extra, log=log)
     fisher = Fisher(game, args.lead, log_path=args.log_reels, on_log_ready=hook)

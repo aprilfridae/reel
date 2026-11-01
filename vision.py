@@ -9,7 +9,7 @@ from paths import RES
 # Where the fishing panel lives, in UI pixels (at UI scale 1) measured from the
 # bottom-center of the window. Roblox keeps the panel anchored there.
 PANEL_HALF_WIDTH = 360
-TRACK_HALF_WIDTH = 212  # the reel track, measured on a test screen (track edges ±214)
+TRACK_HALF_WIDTH = 212  # the reel track, measured on Angie's screen (track edges ±214)
 PANEL_X = None  # (kept for old analysis scripts)
 PANEL_FROM_BOTTOM = (620, 160)
 
@@ -48,7 +48,10 @@ def _has_reel_button(img, scale):
     return float(blue.mean()) > 0.3
 
 
-def detect(img, scale=1.0):
+REEL_ROWS = (400, 190)  # the part of the panel a reel needs (Stop button, track, blue button), from the bottom
+
+
+def detect(img, scale=1.0, rows=PANEL_FROM_BOTTOM):
     """scale = Roblox UI scale (1.0 on the PCs seen so far; see Game.ui_scale).
     Returns dict with:
     busy  - True if the fishing panel (waiting or reeling) is on screen
@@ -58,8 +61,8 @@ def detect(img, scale=1.0):
     All x values are in panel-region pixels.
     """
     h, w = img.shape[:2]
-    y0 = max(0, int(h - PANEL_FROM_BOTTOM[0] * scale))
-    y1 = max(0, int(h - PANEL_FROM_BOTTOM[1] * scale))
+    y0 = max(0, int(h - rows[0] * scale))
+    y1 = max(0, int(h - rows[1] * scale))
     x0 = max(0, int(w / 2 - PANEL_HALF_WIDTH * scale))
     x1 = int(w / 2 + PANEL_HALF_WIDTH * scale)
     raw = img[y0:y1, x0:x1]
