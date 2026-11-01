@@ -26,6 +26,7 @@ RULES = [
     (os.path.join("web", "static", "cards"), "*.jpg", 120, 3),  # market card pictures
     (os.path.join("web", "static", "mine"), "*.jpg", 30, 3),
     (os.path.join("web", "static", "outbid"), "*.jpg", 50, 14),  # "you were outbid" notices
+    (os.path.join("web", "static", "tcards"), "*.jpg", 400, 7),  # card tiles read in the trade window
 ]
 
 

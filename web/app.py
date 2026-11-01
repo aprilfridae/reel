@@ -6,6 +6,7 @@ It only reads and writes the shared files in web/data/; the bot does the actual
 clicking in game. No login: keep it on the home network (don't port-forward it).
 """
 import os
+import re
 import sys
 import time
 import uuid
@@ -233,7 +234,8 @@ def ask_join():
     return jsonify(_market_request("join", {"artist": artist, "rarity": rarity, "serial": serial, "name": name}))
 
 
-TRADE_CMDS = ("accept", "decline", "send", "refresh", "search", "ready", "cancel", "addwanted", "players")
+TRADE_CMDS = ("accept", "decline", "send", "refresh", "search", "ready", "cancel", "addwanted", "players",
+              "add", "remove", "coins")
 
 
 @app.post("/api/trade/cmd")
@@ -253,6 +255,14 @@ def trade_cmd():
     if cmd == "search":
         args["tab"] = "mine" if body.get("tab") == "mine" else "theirs"
         args["query"] = str(body.get("query", "")).strip()[:30]
+    if cmd in ("add", "remove"):
+        args = {k: str(body.get(k, "")).strip()[:40] for k in ("name", "serial", "rarity")}
+        if not args["name"]:
+            return jsonify(error="which card?"), 400
+    if cmd == "coins":
+        args["amount"] = str(body.get("amount", "")).strip().replace(",", "")[:20]
+        if not re.fullmatch(r"\d+(\.\d+)?[KMBTQkmbtq]?", args["amount"]):
+            return jsonify(error="enter an amount like 500, 2.5B or 1T"), 400
     c = {"id": uuid.uuid4().hex[:8], "cmd": cmd, "args": args, "status": "waiting", "result": "",
          "at": time.strftime("%H:%M:%S")}
     webstate.update("trade_cmd.json", [], lambda cs: (cs + [c])[-40:])

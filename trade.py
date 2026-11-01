@@ -5,6 +5,8 @@ a scrolled grid reads the same.
 
 Nothing here adds a card, presses READY or sends a trade on its own: the website asks for each of those.
 """
+import hashlib
+import os
 import re
 import time
 
@@ -14,6 +16,9 @@ import numpy as np
 import trade_badges
 from gifts import _words
 from ocr import read_text
+from paths import APP
+
+PICS = os.path.join(APP, "web", "static", "tcards")  # card tiles as the website shows them
 
 TITLE = (0.09, 0.07, 0.42, 0.14)  # "Trading with <name>"
 POPUP = (0.30, 0.08, 0.70, 0.24)  # "<name> wants to trade!  [Accept] [Decline]"
@@ -41,10 +46,20 @@ def _pt(img, s, x, y):
 # ---------- the window and the requests ----------
 
 def window_open(game, img):
-    """The other player's name if the trade window is up, else None."""
-    text = " ".join(w[0] for w in _words(game, img, TITLE))
-    m = re.search(r"trading\s*with\s*(.*)", text, re.I)
-    return (m.group(1).strip() or "?") if m else None
+    """The other player's name if the trade window is up, else None. The title ("Trading with <name>") can be
+    covered by the chat, so the other panel's header ("<name>'s offer", well away from the chat) also counts."""
+    words = _words(game, img, TITLE)
+    first = next((w for w in words if w[0].lower().startswith("trading")), None)
+    if first:  # only the title's own row (the "@user" line under it is not part of the name)
+        text = " ".join(t for t, x, y in words if abs(y - first[2]) < 10 * _scale(game, img))
+        m = re.search(r"trading\s*with\s*(.*)", text, re.I)
+        if m:
+            return m.group(1).strip() or "?"
+    s = _scale(game, img)
+    x0, y0 = _pt(img, s, 1060, 551)
+    head = read_text(img[int(y0):int(y0 + 32 * s), int(x0):int(x0 + 300 * s)], scale=2)
+    m = re.search(r"(\S+?)\s*['’`´]?\s*s\s+offer\b", head, re.I)
+    return m.group(1) if m and m.group(1).lower() != "your" else None
 
 
 def incoming(game, img):
@@ -178,8 +193,21 @@ def _wanted_label(crop):
     return False
 
 
+def _save_picture(img, cx, ay, by, s, key):
+    """The whole tile as the game draws it (picture, badges, name) -> web/static/tcards/, for the website.
+    Named after what was read off it, so the same card isn't written again."""
+    name = hashlib.md5(key.encode("utf-8", "ignore")).hexdigest()[:12] + ".jpg"
+    path = os.path.join(PICS, name)
+    if not os.path.exists(path):
+        tile = img[max(0, int(ay - 10 * s)):int(by + 104 * s), max(0, int(cx - 76 * s)):int(cx + 76 * s)]
+        if tile.size:
+            os.makedirs(PICS, exist_ok=True)
+            cv2.imwrite(path, tile, [cv2.IMWRITE_JPEG_QUALITY, 82])
+    return name
+
+
 def read_tile(game, img, ax, ay, s):
-    """One card tile from its count badge at (ax, ay): name, rarity, grade, income, serial, wanted, count."""
+    """One card tile from its count badge at (ax, ay): name, rarity, grade, income, serial, wanted, count, img."""
     cx, by = ax - 63 * s, ay + 112 * s  # tile centre column, the serial badge's row
     top = int(by + 20 * s)
     crop = img[top:int(by + 106 * s), int(cx - 72 * s):int(cx + 72 * s)]
@@ -187,8 +215,10 @@ def read_tile(game, img, ax, ay, s):
     wanted = _wanted_label(img[int(by - 14 * s):int(by + 14 * s), int(cx - 72 * s):int(cx - 4 * s)])
     cnt = img[int(ay - 12 * s):int(ay + 12 * s), int(ax - 16 * s):int(ax + 16 * s)]
     m = re.search(r"(\d+)", read_text(cnt, scale=3)) if cnt.size else None
+    serial = trade_badges.read_serial(img, cx, by, s)
+    pic = _save_picture(img, cx, ay, by, s, f"{name}|{rarity}|{serial}|{grade}|{wanted}")
     return {"name": name, "rarity": rarity.lower(), "grade": grade, "income": inc,
-            "serial": trade_badges.read_serial(img, cx, by, s), "wanted": wanted,
+            "serial": serial, "wanted": wanted, "img": pic, "_click": (int(cx), int(by - 45 * s)),
             "count": int(m.group(1)) if m else 1, "_col": int(round((cx - (img.shape[1] / 2 - 675 * s)) / (164 * s)))}
 
 
@@ -205,6 +235,7 @@ def read_offer(game, img, which, scrolling=False):
     summary = " ".join(re.findall(r"\d+\s*wanted|\d+\s*cards?|\+?[\d.]+\s*[KMBT]?\s*/\s*s", head, re.I))
     m = re.search(r"(\d+)\s*cards?", summary)
     total = int(m.group(1)) if m else None
+    coins = read_coins(img, s, area)
     cards, seen = [], set()
     _, oy = _origin(img, s)
     bottom = oy + area[3] * s
@@ -216,6 +247,7 @@ def read_offer(game, img, which, scrolling=False):
                 continue  # a row cut off by the panel's edge: read after scrolling
             t = read_tile(game, img, ax, ay, s)
             t.pop("_col", None)
+            t.pop("_click", None)
             key = (t["name"], t["rarity"], t["serial"], t["grade"])
             if key not in seen:
                 seen.add(key)
@@ -228,7 +260,21 @@ def read_offer(game, img, which, scrolling=False):
     if scrolling and step:
         game.scroll(px, py, 20, check=False)  # back to the top
         game.wait(0.3)
-    return {"cards": cards, "ready": ready, "summary": summary, "total": total}
+    return {"cards": cards, "ready": ready, "summary": summary, "total": total, "coins": coins}
+
+
+_COINS = re.compile(r"([\d.,]+\s*[KMBTQ]?)\s*COINS", re.I)
+
+
+def read_coins(img, s, area):
+    """Coins in one side's offer: the gold coin-bag tile says '<amount> COINS'. '' when there are none."""
+    ox, oy = _origin(img, s)
+    crop = img[int(oy + area[1] * s):int(oy + area[3] * s), int(ox + area[0] * s):int(ox + area[2] * s)]
+    hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV) if crop.size else None
+    if hsv is None or ((hsv[..., 0] >= 18) & (hsv[..., 0] <= 32) & (hsv[..., 1] > 120)).mean() < 0.01:
+        return ""  # no gold tile: skip the reading
+    m = _COINS.search(read_text(crop, scale=1))  # (a gold grade badge also passes the colour test: no "COINS")
+    return m.group(1).replace(" ", "") if m else ""
 
 
 def scroll_grid(game, notches):
@@ -270,6 +316,7 @@ def read_cards(game, limit=20, log=print):
     scroll_grid(game, 40)
     for i, c in enumerate(cards):
         c.pop("_col", None)
+        c.pop("_click", None)
         c["rank"] = i + 1
     return cards[:limit]
 
@@ -493,6 +540,91 @@ def send_request(game, name, log=print, alt="", dry=False):
         game.park_mouse()
         game.wait(0.6)
     return result
+
+
+def _same_card(t, want):
+    """Does a tile read off the screen match the card the website asked for? The serial and rarity must agree
+    (when both are known); the name only roughly, OCR drops or swaps a letter now and then."""
+    for k in ("serial", "rarity"):
+        if want.get(k) and t.get(k) and str(want[k]).lower() != str(t[k]).lower():
+            return False
+    a, b = _squash(t.get("name", "")), _squash(want.get("name", ""))
+    return bool(a and b) and (a == b or a.startswith(b[:6]) or b.startswith(a[:6]))
+
+
+def _squash(s):
+    return re.sub(r"[^a-z0-9]", "", s.lower())
+
+
+def add_card(game, card, log=print):
+    """Click one of my cards into my offer: the website names it ({"name", "serial", "rarity"}). The game's
+    search finds it, the tile with the same serial is clicked once. Does not press READY."""
+    show_tab(game, "mine")
+    search_cards(game, card.get("name", "")[:30], log)
+    try:
+        img = game.frame()
+        s = _scale(game, img)
+        _, oy = _origin(img, s)
+        for ax, ay in _anchors(img, s):
+            if ay + 112 * s + 20 * s > oy + GRID[3] * s:
+                continue
+            t = read_tile(game, img, ax, ay, s)
+            if _same_card(t, card):
+                game.click(*t["_click"])
+                game.park_mouse()
+                game.wait(0.9)
+                log(f"Trade: added {t['name']} #{t['serial']} to the offer")
+                return True, f"added {t['name']} #{t['serial']}"
+        return False, f"couldn't find {card.get('name')} #{card.get('serial')} in my cards"
+    finally:
+        search_cards(game, "", log)
+
+
+def remove_card(game, card, log=print):
+    """Click one card in my offer, which takes it back out."""
+    img = game.frame()
+    s = _scale(game, img)
+    for _ in range(4):
+        for ax, ay in _anchors(img, s, OFFER_MINE):
+            t = read_tile(game, img, ax, ay, s)
+            if _same_card(t, card):
+                game.click(*t["_click"])
+                game.park_mouse()
+                game.wait(0.9)
+                log(f"Trade: took {t['name']} #{t['serial']} out of the offer")
+                return True, f"took out {t['name']} #{t['serial']}"
+        ox, oy = _origin(img, s)  # not in sight: scroll the offer down a bit and look again
+        game.scroll(ox + 1390 * s, oy + 370 * s, -2, check=False)
+        game.wait(0.6)
+        img = game.frame()
+    return False, f"{card.get('name')} isn't in my offer"
+
+
+_AMOUNT = re.compile(r"^\d+(\.\d+)?[KMBTQ]?$", re.I)
+
+
+def set_coins(game, amount, log=print):
+    """Type an amount into the coins box and press Set ("0" takes the coins back out)."""
+    from ui_keys import clear_field, type_text
+    amount = amount.strip().replace(",", "").upper()
+    if not _AMOUNT.match(amount):
+        return False, f"not an amount: {amount}"
+    img = game.frame()
+    s = _scale(game, img)
+    game.click(*_pt(img, s, 330, 951))
+    game.wait(0.3)
+    clear_field()
+    type_text(amount)
+    game.wait(0.3)
+    game.click(*_pt(img, s, 482, 951))  # Set
+    game.park_mouse()
+    game.wait(1.0)
+    x0, y0 = _pt(img, s, 560, 905)
+    said = " ".join(read_text(game.frame()[int(y0):int(y0 + 42 * s), int(x0):int(x0 + 800 * s)], scale=2).split())
+    log(f"Trade: coins set to {amount} ({said or 'no message'})")
+    if re.search(r"not\s*enough|invalid|can'?t", said, re.I):
+        return False, said
+    return True, said or f"coins: {amount}"
 
 
 def search_cards(game, query, log=print):

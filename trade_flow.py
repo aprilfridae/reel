@@ -11,6 +11,7 @@ import uuid
 
 import cv2
 
+import chat
 import trade
 import webstate
 from paths import APP
@@ -146,6 +147,7 @@ class TradeFlow:
         if name and self.window_seen_at is None:
             self.window_seen_at = time.time()
             self.log(f"Trade window with {name}")
+            chat.hide_window(g)  # the chat is drawn over the window's left side (its tabs and first cards)
             try:
                 self.scan()
             except Exception as e:  # reading is a convenience: the window stays usable
@@ -155,6 +157,7 @@ class TradeFlow:
             self._save(open=None, mine=[], theirs=[], wanted=[], wanted_count=0, search=None, offer=None)
             self._offer_sig = None
             self.log("Trade window closed")
+            chat.restore_window(g)
         if name and time.time() - self.snap_at > SNAP_EVERY:
             self.snapshot()
             try:
@@ -193,6 +196,17 @@ class TradeFlow:
             self.scan()  # the lists changed
             self.read_offers(force=True)
             return bool(added), (f"added {', '.join(added)} to the offer" if added else "no wanted cards found")
+        if cmd in ("add", "remove"):
+            card = {k: str(a.get(k, ""))[:40] for k in ("name", "serial", "rarity")}
+            ok, msg = (trade.add_card if cmd == "add" else trade.remove_card)(g, card, self.log)
+            self.read_offers(force=True)
+            self.snapshot()
+            return ok, msg
+        if cmd == "coins":
+            ok, msg = trade.set_coins(g, str(a.get("amount", ""))[:20], self.log)
+            self.read_offers(force=True)
+            self.snapshot()
+            return ok, msg
         if cmd in ("ready", "cancel"):
             ok = trade.press(g, cmd)
             self.snapshot()
