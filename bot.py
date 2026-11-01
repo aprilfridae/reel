@@ -25,6 +25,7 @@ import cv2
 
 import balance
 import chat
+import cleanup
 import diagnostics
 import gifts
 import index_check
@@ -505,7 +506,15 @@ def main():
     rb["wanted"] = (CFG["nightly_rebirth"] and packs_done_today and rebirth.nightly_wanted()
                     and tz.now().hour < PACK_SESSION_LATEST)
 
+    tidy = {"at": 0.0}
+
     def one_round():
+        if time.time() - tidy["at"] > 6 * 3600:  # old pictures off the disk: at start-up, then every 6 hours
+            tidy["at"] = time.time()
+            try:
+                cleanup.run(log)
+            except Exception as e:
+                log(f"(couldn't clean up old pictures: {type(e).__name__})")
         if updater.pending():
             log("A newer version is downloaded: restarting into it")
             raise StopBot()
