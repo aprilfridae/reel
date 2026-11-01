@@ -452,8 +452,13 @@ def main():
     def run_session():
         manual = once("packs")  # "Open packs now" on the website
         log("Pack session: opening every Rainbow-or-rarer and event pack" + (" (asked for on the website)" if manual else ""))
-        done = packs.open_session(should_stop=lambda: meteor_soon() or market_work() or chat_waiting()
-                                  or mode() == "pause" or (not manual and not auto()), log=log)
+        try:
+            done = packs.open_session(should_stop=lambda: meteor_soon() or market_work() or chat_waiting()
+                                      or mode() in ("pause", "fish") or (not manual and not auto()), log=log)
+        except Exception:
+            if manual:
+                done_once("packs")  # a job that keeps failing must not come back every round
+            raise
         if done:
             with open(SESSION_STATE, "w") as f:
                 f.write(datetime.now().date().isoformat())
@@ -464,6 +469,9 @@ def main():
             rb["wanted"] = auto() and in_window and CFG["nightly_rebirth"] and rebirth.nightly_wanted()
         else:
             log("Pack session paused (bid/buy/chat); it picks up again right after")
+
+    # one-time jobs from the website don't survive a restart (a stuck one would come back forever)
+    webstate.update("mode.json", {}, lambda m: {**m, "once": []})
 
     # restarted after tonight's packs were opened but before its rebirths were done?
     try:
@@ -497,6 +505,8 @@ def main():
         if idx["wanted"]:
             run_index()
             return
+        if once("packs") and mode() == "fish":
+            done_once("packs")  # "fish" means only fish: a leftover "open packs now" is dropped
         if once("packs") or session_due():
             run_session()
             return
