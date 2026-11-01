@@ -34,6 +34,7 @@ import market_scan
 import mybids
 import whoowns
 import rebirth
+import trade_flow
 import updater
 import webstate
 from config import load as load_config
@@ -94,6 +95,7 @@ def main():
     packs = Packs(game)
     events = EventWatcher(game)
     chores = gifts.Chores(game, log=log)
+    tflow = trade_flow.TradeFlow(game, log=log)
     log("Bot started. Press F8 (or create stop.flag) to stop.")
 
     req = {"checked": 0.0, "any": False}
@@ -392,6 +394,8 @@ def main():
             dc["checked"] = time.time()
             if launcher.is_disconnected(game, img):
                 raise WindowLost()  # handled in the main loop: reconnect, then carry on
+        if tflow.poll(img):  # a trade window or request popup showed up, or the website sent a trade command
+            return True
         if talk.due():
             talk.read(img)
         if coins.due():
@@ -428,6 +432,9 @@ def main():
         return False
 
     def act():
+        if tflow.busy() or tflow.has_cmds():
+            tflow.handle()
+            return
         if waiting_requests(MARKET_KINDS + ("rebirth",)) or market_due():  # bids / buys first
             market_trip()
         if rb_peek_due():
@@ -509,6 +516,10 @@ def main():
                 game.ensure_fullscreen(log)
             elif window_is_fullscreen(game.hwnd):
                 fs["tries"] = 0
+        tflow.poll(game.frame())  # (throttled) a trade window may have been open since before this round
+        if tflow.busy() or tflow.has_cmds():
+            tflow.handle()  # a trade window is open (nothing else may click around), or the website asked
+            return
         if chat_waiting():
             send_chat()
             return
@@ -539,7 +550,8 @@ def main():
         log("Fishing" + ("" if auto() else " only (set on the website)"))
         teleport_to_fishing(game)
         fishing_mode = mode()
-        fisher.run(should_stop=lambda: updater.pending() or meteor_soon() or session_due() or market_work()
+        fisher.run(should_stop=lambda: updater.pending() or tflow.busy() or tflow.has_cmds()
+                   or meteor_soon() or session_due() or market_work()
                    or once("packs") or once("index") or mode() != fishing_mode,
                    on_catch=check_atlantis,
                    on_stuck=lambda: teleport_to_fishing(game),

@@ -123,6 +123,7 @@ def state():
         "lookup": webstate.load("lookup.json", {}),
         "bid_anyway": bid_anyway(),
         "bids_seen": webstate.load("bids_seen.json", {}),
+        "trade": {**webstate.load("trade.json", {}), "cmds": webstate.load("trade_cmd.json", [])[-8:]},
         "now": time.time(),  # so the page's countdowns use this PC's clock
     })
 
@@ -225,6 +226,32 @@ def ask_join():
     if not artist or rarity not in RARITIES or not name:
         return jsonify(error="artist, rarity and owner are needed"), 400
     return jsonify(_market_request("join", {"artist": artist, "rarity": rarity, "serial": serial, "name": name}))
+
+
+TRADE_CMDS = ("accept", "decline", "send", "refresh", "search", "ready", "cancel", "addwanted", "players")
+
+
+@app.post("/api/trade/cmd")
+def trade_cmd():
+    """Something the bot should do in the game's Trade window / request popup. Each one is pressed here, by you:
+    the bot never accepts, sends, or presses READY on its own."""
+    body = request.get_json(force=True)
+    cmd = body.get("cmd")
+    if cmd not in TRADE_CMDS:
+        return jsonify(error="unknown trade command"), 400
+    args = {}
+    if cmd == "send":
+        args["name"] = str(body.get("name", "")).strip()[:40]
+        args["alt"] = str(body.get("alt", "")).strip()[:40]  # the display name, tried if the user name is misread
+        if not args["name"]:
+            return jsonify(error="enter the player's name"), 400
+    if cmd == "search":
+        args["tab"] = "mine" if body.get("tab") == "mine" else "theirs"
+        args["query"] = str(body.get("query", "")).strip()[:30]
+    c = {"id": uuid.uuid4().hex[:8], "cmd": cmd, "args": args, "status": "waiting", "result": "",
+         "at": time.strftime("%H:%M:%S")}
+    webstate.update("trade_cmd.json", [], lambda cs: (cs + [c])[-40:])
+    return jsonify(c)
 
 
 @app.post("/api/rebirth")
