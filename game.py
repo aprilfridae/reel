@@ -364,12 +364,17 @@ class Game:
         log("Couldn't put Roblox in fullscreen")
         return False
 
+    _stop_checked, _stop_file = 0.0, False
     cleaning = False  # set while tidying the screen on the way out: a stop request is already being obeyed
 
     def check_stop(self):
         if self.cleaning:
             return
-        if user32.GetAsyncKeyState(VK_F8) & 0x8000 or os.path.exists(STOP_FILE):
+        now = time.time()
+        if now - self._stop_checked > 0.2:  # (a file lookup per frame is slow on a PC with a busy virus scanner)
+            self._stop_checked = now
+            self._stop_file = os.path.exists(STOP_FILE)
+        if user32.GetAsyncKeyState(VK_F8) & 0x8000 or self._stop_file:
             raise StopBot()
 
     def frame(self):

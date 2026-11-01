@@ -4,6 +4,7 @@ Fish only:  python fisher.py   (stand at a fishing spot first; F8 stops)
 The full schedule (fishing + packs + event) is in bot.py.
 """
 import argparse
+import json
 import os
 import time
 
@@ -11,7 +12,7 @@ import cv2
 
 from game import HERE, Game, StopBot
 from packs import close_popup, dismiss_popup, read_catch_popup
-from vision import PANEL_FROM_BOTTOM, PANEL_HALF_WIDTH, REEL_ROWS, detect
+from vision import PANEL_FROM_BOTTOM, PANEL_HALF_WIDTH, STRIP_HALF, STRIP_ROWS, detect
 
 # Bar physics fitted from live reels on Angie's PC at 50 fps (px/s^2 at UI scale 1)
 A_HOLD = 1015
@@ -23,8 +24,48 @@ SLOW_FULL_EVERY = 0.5  # seconds between whole-window frames while fishing witho
 LOG_FIRST_REELS = 10 # reels of each run written to reel_log.csv
 FAST_LOOK = 0.02 # seconds between looks (50 a second) the bar controller was tuned at
 SLOW_LEAD = 1.5  # extra lead per second of look time beyond that
-PENDING_WAIT = 20 # seconds act() (opening event packs...) waits for a cast in the water to be caught
+CALIB_FILE = os.path.join(HERE, "reel_calib.json")
+PENDING_WAIT = 20# seconds act() (opening event packs...) waits for a cast in the water to be caught
 STUCK_AFTER = 15  # seconds of pressing E with no fishing panel before it counts as stuck
+
+
+def fit_lag(reels, min_frames=15):
+    """How long after E is pressed or released the bar starts to answer, fitted from recorded reels
+    [(times, bar centres, holds)]: acceleration = (A_hold if held else -A_release) + drag * velocity, with the
+    hold delayed by `lag`. About 50 ms on Angie's PC and 175 ms on a PC with a slower link to the game
+    (analysis/fit_physics.py). None if there isn't enough to go on."""
+    import numpy as np
+    best = None
+    for lag in np.arange(0.0, 0.401, 0.025):
+        X, y = [], []
+        for t, c, hold in reels:
+            if len(t) < min_frames:
+                continue
+            t, c, hold = np.asarray(t, float), np.asarray(c, float), np.asarray(hold, float)
+            v = np.gradient(c, t)
+            a = np.convolve(np.gradient(v, t), np.ones(3) / 3, mode="same")
+            vs = np.convolve(v, np.ones(3) / 3, mode="same")
+            idx = np.clip(np.searchsorted(t, t - lag, side="right") - 1, 0, None)
+            h = hold[idx]
+            for i in np.where((t - lag) >= t[0])[0][2:-2]:
+                X.append([h[i], 1 - h[i], vs[i]])
+                y.append(a[i])
+        if len(y) < 80:
+            return None
+        X, y = np.array(X), np.array(y)
+        coef = np.linalg.lstsq(X, y, rcond=None)[0]
+        err = float(np.mean((X @ coef - y) ** 2))
+        if best is None or err < best[0]:
+            best = (err, float(lag))
+    return best[1]
+
+
+def lead_for_lag(lag):
+    """How far ahead (seconds) to aim the bar for a given input lag: the best lead in replays was 0.4 at 50 ms
+    of lag and about 1.0 at 175 ms (analysis/sim_friend.py). A lag under ~90 ms leaves the default alone."""
+    if lag is None or lag <= 0.09:
+        return DEFAULT_LEAD
+    return min(1.3, max(DEFAULT_LEAD, 0.4 + 4.5 * (lag - 0.05)))
 
 
 def plan_hold(fish, fish_v, c, v, width, physics, horizon=0.6, dt=0.025, last=None):
@@ -139,19 +180,55 @@ class Fisher:
         self.first_reel_t = None
         self.grab_ms = 0.0  # smoothed time to get one frame
         self.grab_full_ms = 0.0  # ...and one whole frame
+        self.detect_ms = 0.0  # ...and to read the bar and fish off it
         if self.csv is None:
             path = os.path.join(HERE, "reel_log.csv")
             try:
                 if not os.path.exists(path) or os.path.getsize(path) < 300_000:
                     self.csv_path = path
                     self.csv_start = os.path.getsize(path) if os.path.exists(path) else 0
-                    self.csv = open(path, "a", buffering=1)
+                    self.csv = open(path, "a", buffering=1 << 16)  # (flushed after each reel: a write per frame is slow on a weak PC)
                     if self.csv.tell() == 0:
                         self.csv.write("reel,t,zl,zr,fish,hold,caught\n")
             except OSError:
                 self.csv = None
         self.reel_id = 0
         self.sample_saved = False
+        # The bar answers E after a delay that differs by PC (50 ms on one, 175 ms on another): it's fitted from the
+        # first reels and sets how far ahead to aim (a saved value is used until then)
+        self.auto_lead = lead == DEFAULT_LEAD
+        self.cal_frames, self.cal_reels, self.lag = [], [], None
+        if self.auto_lead:
+            try:
+                saved = json.load(open(CALIB_FILE))
+                self.lag = saved.get("lag")
+                self.reeler.lead = float(saved.get("lead", lead))
+            except (OSError, ValueError, TypeError):
+                pass
+
+    def _calibrate(self):
+        frames, self.cal_frames = self.cal_frames, []
+        if len(frames) >= 15:
+            t, c, h = zip(*frames)
+            self.cal_reels = (self.cal_reels + [(t, c, h)])[-12:]
+        if not self.auto_lead or len(self.cal_reels) not in (3, 6, 10) or len(frames) < 15:
+            return
+        try:
+            lag = fit_lag(self.cal_reels)
+        except Exception as e:  # tuning is a convenience: the default lead stays
+            print(f"(couldn't fit the bar's response: {type(e).__name__})")
+            return
+        if lag is None:
+            return
+        self.lag = lag
+        lead = lead_for_lag(lag)
+        if abs(lead - self.reeler.lead) > 0.05:
+            print(f"The bar answers E after about {lag * 1000:.0f} ms here: aiming {lead:.2f}s ahead (was {self.reeler.lead:.2f}s)")
+        self.reeler.lead = lead
+        try:
+            json.dump({"lag": lag, "lead": lead}, open(CALIB_FILE, "w"))
+        except OSError:
+            pass
 
     def run(self, should_stop=lambda: False, on_catch=None, on_stuck=None,
             watch=None, act=None):
@@ -178,12 +255,15 @@ class Fisher:
                 # Without the GPU stream a whole frame takes ~100 ms; the strip around the panel is all the
                 # reel needs, and several times quicker. A whole frame is still taken now and then
                 # (for watch: events, chat, coins) while not reeling.
+                # (the longer a whole frame takes, the less often one is taken)
+                full_every = max(SLOW_FULL_EVERY, self.grab_full_ms / 1000 * 20)
                 panel_only = (game.panel_capture and scale is not None
-                              and (state == "reel" or now - last_full < SLOW_FULL_EVERY))
+                              and (state == "reel" or now - last_full < full_every))
+                half = PANEL_HALF_WIDTH
                 if panel_only:
-                    rows = REEL_ROWS if state == "reel" else PANEL_FROM_BOTTOM
+                    rows, half = STRIP_ROWS, STRIP_HALF  # just the Stop button, the track and the blue button
                     t_grab = time.time()
-                    img = game.panel_frame(rows, PANEL_HALF_WIDTH, scale)
+                    img = game.panel_frame(rows, half, scale)
                 else:
                     rows = PANEL_FROM_BOTTOM
                     t_grab = time.time()
@@ -195,7 +275,9 @@ class Fisher:
                         pending = True
                         pending_since = now
                 self.grab_ms = 0.95 * self.grab_ms + 0.05 * (time.time() - t_grab) * 1000
-                d = detect(img, scale if scale is not None else game.ui_scale(img), rows)
+                t_det = time.time()
+                d = detect(img, scale if scale is not None else game.ui_scale(img), rows, reeling=state == "reel", half=half)
+                self.detect_ms = 0.95 * self.detect_ms + 0.05 * (time.time() - t_det) * 1000
                 # act() opens menus: not while a fish is on the line or being reeled (that catch is
                 # finished and its popup closed first), but don't wait more than PENDING_WAIT for it
                 if pending and not d["zone"] and state != "reel" and (not d["busy"] or now - pending_since > PENDING_WAIT):
@@ -221,6 +303,7 @@ class Fisher:
                         cv2.imwrite(os.path.join(HERE, "reel_sample.jpg"), img, [cv2.IMWRITE_JPEG_QUALITY, 85])
                     hold = self.reeler.step(d, now)
                     game.key("e", hold)
+                    self.cal_frames.append((now, (d["zone"][0] + d["zone"][1]) / 2, float(hold)))
                     if self.log and self.reel_id < 6 and int(now * 4) % 4 == 0 and \
                             now - getattr(self, "_last_shot", 0) > 0.9:
                         # a few screenshots mid-reel, to check the vision against
@@ -254,6 +337,9 @@ class Fisher:
                         self.csv.write(f"{self.reel_id},{time.time():.3f},,,,,"
                                        f"{int(self.last_popup is not None)}\n")
                     self.reel_id += 1
+                    self._calibrate()
+                    if self.csv:
+                        self.csv.flush()
                     secs = max(time.time() - reel_t0, 0.1)
                     self.looks.append(reel_frames / secs)
                     print(f"Reel finished ({self.catches} so far, {reel_frames / secs:.0f} looks/s)"
@@ -269,6 +355,8 @@ class Fisher:
                                           f"capture {game.cap.mode}{' + strip' if game.strips or game.slow_capture else ''}, "
                                           f"median {mid:.0f} looks/s, "
                                           f"frame grab {self.grab_ms:.0f} ms (whole frame {self.grab_full_ms:.0f} ms), "
+                                          f"detect {self.detect_ms:.0f} ms, "
+                                          f"bar lag {'?' if self.lag is None else f'{self.lag * 1000:.0f} ms'}, "
                                           f"{self.reeler.lead:.2f}s lead")
                         self.on_log_ready = None
                     if won_pack:

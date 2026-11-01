@@ -48,10 +48,12 @@ def _has_reel_button(img, scale):
     return float(blue.mean()) > 0.3
 
 
-REEL_ROWS = (400, 190)  # the part of the panel a reel needs (Stop button, track, blue button), from the bottom
+STRIP_ROWS = (385, 200)  # all a reel needs of the panel (Stop button, track, blue button), rows from the bottom
+STRIP_HALF = 220  # ...and its half width: the track is +-212 and the Stop button ends at +218 (UI pixels)
+REEL_ROWS = STRIP_ROWS  # (old name)
 
 
-def detect(img, scale=1.0, rows=PANEL_FROM_BOTTOM):
+def detect(img, scale=1.0, rows=PANEL_FROM_BOTTOM, reeling=False, half=PANEL_HALF_WIDTH):
     """scale = Roblox UI scale (1.0 on the PCs seen so far; see Game.ui_scale).
     Returns dict with:
     busy  - True if the fishing panel (waiting or reeling) is on screen
@@ -63,10 +65,16 @@ def detect(img, scale=1.0, rows=PANEL_FROM_BOTTOM):
     h, w = img.shape[:2]
     y0 = max(0, int(h - rows[0] * scale))
     y1 = max(0, int(h - rows[1] * scale))
-    x0 = max(0, int(w / 2 - PANEL_HALF_WIDTH * scale))
-    x1 = int(w / 2 + PANEL_HALF_WIDTH * scale)
+    x0 = max(0, int(w / 2 - half * scale))
+    x1 = int(w / 2 + half * scale)
+    shift = (PANEL_HALF_WIDTH - half) * scale  # keeps x values comparable between a strip and a whole frame
     raw = img[y0:y1, x0:x1]
-    busy = _has_stop_button(raw, scale)
+    if reeling and _has_reel_button(img, scale):
+        # already reeling and the big blue button is up: that is the reel panel, no need to look for the Stop
+        # button's picture again on every frame (a template match: a good part of a frame's time on a weak PC)
+        busy = True
+    else:
+        busy = _has_stop_button(raw, scale)
     out = {"busy": busy, "zone": None, "fish": None, "scale": scale}
     if not busy:
         return out  # the reel bar always comes with the red Stop button
@@ -117,7 +125,7 @@ def detect(img, scale=1.0, rows=PANEL_FROM_BOTTOM):
     block = max(groups, key=lambda grp: int(grp.max() - grp.min()))
     if block.max() - block.min() < 20 * scale:
         return out
-    out["zone"] = (int(block.min()), int(block.max()))
+    out["zone"] = (int(block.min() + shift), int(block.max() + shift))
 
     # The fish is whatever bright, non-green, non-white thing sits in the track.
     # Not keyed to blue, since rarer fish may use other colors.
@@ -127,7 +135,7 @@ def detect(img, scale=1.0, rows=PANEL_FROM_BOTTOM):
     fish[:, max(0, right - edge):] = False
     fcols = np.where(fish.sum(0) > 2)[0]
     if len(fcols) > 3 * scale:
-        out["fish"] = float(np.median(fcols))
+        out["fish"] = float(np.median(fcols)) + shift
     return out
 
 
