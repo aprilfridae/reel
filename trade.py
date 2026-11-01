@@ -411,15 +411,24 @@ def read_players(game, log=print):
             if sy + 24 * s > _pt(img, s, 0, 905)[1]:
                 continue  # button cut off by the list's edge: its name may be too
             cx = min((_pt(img, s, c, 0)[0] for c in (608, 957, 1306)), key=lambda c: abs(c - sx))
-            crop = img[int(sy - 75 * s):int(sy - 20 * s), int(cx - 170 * s):int(cx + 170 * s)]
-            text = " ".join(read_text(crop, scale=2).split())
-            mm = _PLAYER.match(text)
-            if not mm or not mm.group(1):
-                continue
-            key = mm.group(2).lower()
+            x0, x1 = int(cx - 170 * s), int(cx + 170 * s)
+            # the display name and the @user name are read as two separate lines: read together, an "@" read as
+            # an "O" ("cable" / "Oka-bel") left a player out of the list altogether
+            name = " ".join(read_text(img[int(sy - 74 * s):int(sy - 47 * s), x0:x1], scale=2).split())
+            user = "".join(read_text(img[int(sy - 51 * s):int(sy - 27 * s), x0:x1], scale=2).split())
+            if user[:1] == "@":
+                user = user[1:]
+            elif user[:1] in "O0Qo©®" and len(user) > 2:
+                user = user[1:]  # the "@" misread
+            if not name or not user:
+                mm = _PLAYER.match(" ".join(read_text(img[int(sy - 75 * s):int(sy - 20 * s), x0:x1], scale=2).split()))
+                if not mm or not mm.group(1):
+                    continue
+                name, user = mm.group(1).strip(), mm.group(2)
+            key = user.lower()
             if key not in seen:
                 seen.add(key)
-                players.append({"name": mm.group(1).strip(), "user": mm.group(2)})
+                players.append({"name": name, "user": user})
                 new += 1
         if total is not None and len(players) >= total:
             break

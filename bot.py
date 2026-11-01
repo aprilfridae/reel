@@ -32,6 +32,7 @@ import launcher
 import market
 import market_scan
 import mybids
+import outbid
 import packlog
 import whoowns
 import rebirth
@@ -92,6 +93,7 @@ def main():
     events = EventWatcher(game)
     chores = gifts.Chores(game, log=log)
     tflow = trade_flow.TradeFlow(game, log=log)
+    outbids = outbid.Watcher(log=log)  # the game's "YOU WERE OUTBID!" notice -> the website
     events.on_label = packlog.roll_seen  # (the auto-roll label feeds the website's roll counts)
     log("Bot started. Press F8 (or create stop.flag) to stop.")
 
@@ -393,6 +395,7 @@ def main():
                 raise WindowLost()  # handled in the main loop: reconnect, then carry on
         if tflow.poll(img):  # a trade window or request popup showed up, or the website sent a trade command
             return True
+        outbids.poll(img)
         if talk.due():
             talk.read(img)
         if coins.due():
@@ -521,7 +524,9 @@ def main():
                 game.ensure_fullscreen(log)
             elif window_is_fullscreen(game.hwnd):
                 fs["tries"] = 0
-        tflow.poll(game.frame())  # (throttled) a trade window may have been open since before this round
+        frame = game.frame()
+        outbids.poll(frame)
+        tflow.poll(frame)  # (throttled) a trade window may have been open since before this round
         if tflow.busy() or tflow.has_cmds():
             tflow.handle()  # a trade window is open (nothing else may click around), or the website asked
             return

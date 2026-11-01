@@ -211,6 +211,19 @@
   .adv summary::after { content: " +"; }
   .adv[open] summary::after { content: " −"; }
   .adv summary:hover { color: var(--fg); }
+  /* "you were outbid!" — looks like the game's own notice: black box, red frame, under the top bar */
+  .outbids { position: fixed; top: calc(var(--top) + 8px); left: 50%; transform: translateX(-50%); z-index: 50;
+    display: grid; gap: 8px; width: min(560px, calc(100vw - 32px)); pointer-events: none; }
+  .outbid { pointer-events: auto; display: grid; grid-template-columns: auto 1fr auto; gap: 12px; align-items: center;
+    padding: 10px 12px; background: #050505; border: 2px solid #ef4444; border-radius: 12px;
+    box-shadow: 0 0 24px rgba(239, 68, 68, .35); animation: ob-in .3s var(--ease); }
+  .outbid img { width: 44px; height: 60px; object-fit: cover; object-position: 2% center; border-radius: 6px; cursor: zoom-in; }
+  .outbid b { display: block; color: #ef4444; font: 800 15px/1.2 var(--f-body); }
+  .outbid .ob-line { font-size: 13px; overflow-wrap: anywhere; }
+  .outbid .ob-at { color: var(--dim); font: 500 11px/1.4 var(--f-mono); }
+  .outbid .ob-x { width: 26px; height: 26px; border-radius: 50%; border: 0; background: #ef4444; color: #fff;
+    font: 700 14px/1 var(--f-body); cursor: pointer; padding: 0; }
+  @keyframes ob-in { from { opacity: 0; transform: translateY(-8px); } }
   .lightbox { position: fixed; inset: 0; z-index: 60; display: none; place-items: center; background: rgba(9, 9, 8, .86); padding: 24px; }
   .lightbox.on { display: grid; }
   .lightbox figure { display: grid; gap: 12px; justify-items: center; max-width: min(92vw, 560px); max-height: 94vh; cursor: zoom-out; }
@@ -402,6 +415,7 @@
   <div class="side-foot"><span class="dot" id="side-dot"></span><span id="side-status">connecting…</span></div>
 </aside>
 <div class="scrim" id="scrim"></div>
+<div class="outbids" id="outbids" aria-live="assertive"></div>
 <div class="lightbox" id="lightbox" role="dialog" aria-label="enlarged card"><figure><img id="lb-img" alt=""><figcaption id="lb-cap"></figcaption></figure></div>
 
 <div class="main">
@@ -1030,6 +1044,37 @@ function tick() {
 }
 setInterval(tick, 1000);
 
+// the game's "YOU WERE OUTBID!" notices: shown until dismissed (remembered in this browser), a day at most
+const OB_KEY = "outbid-dismissed";
+function obDismissed() { try { return Number(localStorage.getItem(OB_KEY)) || 0; } catch { return 0; } }
+function renderOutbid(s) {
+  const upTo = obDismissed(), nowSecs = Date.now() / 1000 + clockOffset;
+  const list = (s.outbid || []).filter(e => e.ts > upTo && nowSecs - e.ts < 86400).slice(-3).reverse();
+  const key = list.map(e => e.ts).join(",");
+  const box = $("outbids");
+  if (box.dataset.key === key) return;
+  box.dataset.key = key;
+  document.title = document.title.replace(/^\(\d+\) /, "");
+  if (list.length) document.title = `(${list.length}) ${document.title}`;
+  box.innerHTML = list.map(e => {
+    const line = e.by ? `${esc(e.by)} bid ${esc(e.amount)} on ${esc(e.card)} (${esc(e.rarity)}) · you bid ${esc(e.mine)}`
+                      : esc(e.text || "");
+    return `<div class="outbid" data-ts="${e.ts}">
+      ${e.image ? `<img class="zoomable" src="/static/outbid/${esc(e.image)}" data-full="/static/outbid/${esc(e.image)}" alt="the notice in the game">` : "<span></span>"}
+      <div><b>⚠ you were outbid!</b><div class="ob-line">${line}</div><div class="ob-at">${esc(e.at || "")}</div></div>
+      <button class="ob-x" aria-label="dismiss">×</button></div>`;
+  }).join("");
+}
+$("outbids").addEventListener("click", ev => {
+  const x = ev.target.closest(".ob-x");
+  if (!x) return;
+  const ts = Number(x.closest(".outbid").dataset.ts);
+  try { localStorage.setItem(OB_KEY, String(Math.max(ts, obDismissed()))); } catch {}
+  x.closest(".outbid").remove();
+  $("outbids").dataset.key = "";
+  document.title = document.title.replace(/^\(\d+\) /, "");
+});
+
 function setLive(live, short) {
   for (const id of ["status-dot", "side-dot"]) { $(id).classList.toggle("live", live); $(id).classList.toggle("off", !live); }
   $("status-label").textContent = live ? "bot is live" : "offline";
@@ -1056,7 +1101,7 @@ async function refresh() {
   const live = ((s.market || {}).cards || []).filter(c => !c.ends_ts || c.ends_ts > nowSecs).length;
   $("nav-market-count").textContent = live ? String(live) : "";
   // one section failing to draw must not stop the others
-  for (const draw of [renderMarket, renderActivity, renderOnes, renderPacks, renderTrade, renderWho, renderControls, renderRebirth, renderLog]) {
+  for (const draw of [renderMarket, renderActivity, renderOnes, renderPacks, renderTrade, renderWho, renderControls, renderRebirth, renderLog, renderOutbid]) {
     try { draw(s); } catch (err) { console.error(err); }
   }
   try { renderChat(s.chat || [], s.outbox || []); } catch (err) { console.error(err); }
