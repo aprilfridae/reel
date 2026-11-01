@@ -19,7 +19,10 @@ A_RELEASE = 737
 DEFAULT_LEAD = 0.4  # best in replays of real reels (analysis/sim_reels.py)
 CAST_DELAY = 0.3  # seconds the fishing panel must be gone before the first cast press
 RECAST_EVERY = 0.4  # then E is pressed this often until a cast starts (the panel takes ~0.3s to show)
-PENDING_WAIT = 20  # seconds act() (opening event packs...) waits for a cast in the water to be caught
+LOG_FIRST_REELS = 10  # reels of each run written to reel_log.csv
+FAST_LOOK = 0.02 # seconds between looks (50 a second) the bar controller was tuned at
+SLOW_LEAD = 1.5  # extra lead per second of look time beyond that
+PENDING_WAIT = 20 # seconds act() (opening event packs...) waits for a cast in the water to be caught
 STUCK_AFTER = 15  # seconds of pressing E with no fishing panel before it counts as stuck
 
 
@@ -67,6 +70,7 @@ def plan_hold(fish, fish_v, c, v, width, physics, horizon=0.6, dt=0.025, last=No
 class Reeler:
     def __init__(self, lead):
         self.lead = lead
+        self.T = FAST_LOOK  # smoothed time between looks at the screen (a slow PC sees fewer frames)
         self.reset()
 
     def reset(self):
@@ -94,6 +98,7 @@ class Reeler:
 
         if self.prev_t is not None and now > self.prev_t:
             dt = now - self.prev_t
+            self.T = 0.9 * self.T + 0.1 * min(dt, 0.5)
             self.v = 0.5 * self.v + 0.5 * (c - self.prev_c) / dt
             if self.fish is not None and self.prev_fish is not None:
                 self.fish_v = 0.7 * self.fish_v + 0.3 * (self.fish - self.prev_fish) / dt
@@ -107,7 +112,10 @@ class Reeler:
         # and hold E if the bar would still fall short after reacting and braking.
         vr = self.v - self.fish_v
         brake = (A_RELEASE if vr > 0 else A_HOLD) * s
-        return self.fish - c > vr * self.lead + vr * abs(vr) / (2 * brake)
+        # fewer looks per second means the hold/release is acted on later and lasts longer: aim further
+        # ahead then (replays in analysis/sim_lowfps.py; nothing changes at 50 looks/s or more)
+        lead = self.lead + SLOW_LEAD * max(0.0, self.T - FAST_LOOK)
+        return self.fish - c > vr * lead + vr * abs(vr) / (2 * brake)
 
 
 class Fisher:
@@ -121,7 +129,20 @@ class Fisher:
         self.log = open(log_path, "a", buffering=1) if log_path else None
         if self.log and self.log.tell() == 0:
             self.log.write("reel,t,zl,zr,fish,hold,caught\n")
+        # A short record of the first reels of every run (reel_log.csv next to the program), to
+        # tune the controller to a PC it hasn't seen: how the bar answered E, how the fish moved
+        self.csv = self.log
+        if self.csv is None:
+            path = os.path.join(HERE, "reel_log.csv")
+            try:
+                if not os.path.exists(path) or os.path.getsize(path) < 300_000:
+                    self.csv = open(path, "a", buffering=1)
+                    if self.csv.tell() == 0:
+                        self.csv.write("reel,t,zl,zr,fish,hold,caught\n")
+            except OSError:
+                self.csv = None
         self.reel_id = 0
+        self.sample_saved = False
 
     def run(self, should_stop=lambda: False, on_catch=None, on_stuck=None,
             watch=None, act=None):
@@ -140,6 +161,7 @@ class Fisher:
         last_zone = 0.0
         pending = False
         pending_since = 0.0
+        reel_t0, reel_frames = time.time(), 0
         try:
             while True:
                 now = time.time()
@@ -165,6 +187,12 @@ class Fisher:
                         state = "reel"
                         saved_stuck = False
                         self.reeler.reset()
+                        reel_t0, reel_frames = now, 0
+                    reel_frames += 1
+                    if not self.sample_saved and now - reel_t0 > 1.5:
+                        # one picture of a reel in progress, to check the vision against on a new PC
+                        self.sample_saved = True
+                        cv2.imwrite(os.path.join(HERE, "reel_sample.jpg"), img, [cv2.IMWRITE_JPEG_QUALITY, 85])
                     hold = self.reeler.step(d, now)
                     game.key("e", hold)
                     if self.log and self.reel_id < 6 and int(now * 4) % 4 == 0 and \
@@ -172,9 +200,9 @@ class Fisher:
                         # a few screenshots mid-reel, to check the vision against
                         self._last_shot = now
                         cv2.imwrite(os.path.join(HERE, f"reel_{self.reel_id}_{int(now * 10) % 100000}.png"), img)
-                    if self.log:
+                    if self.csv and (self.log or self.reel_id < LOG_FIRST_REELS):
                         fish = "" if d["fish"] is None else f"{d['fish']:.1f}"
-                        self.log.write(f"{self.reel_id},{now:.3f},{d['zone'][0]},{d['zone'][1]},"
+                        self.csv.write(f"{self.reel_id},{now:.3f},{d['zone'][0]},{d['zone'][1]},"
                                        f"{fish},{int(hold)},\n")
                     if self.debug:
                         print(f"zone={d['zone']} fish={d['fish']} v={self.reeler.v:6.0f} hold={hold}")
@@ -195,12 +223,14 @@ class Fisher:
                     game.key("e", False)
                     self.catches += 1
                     won_pack, self.last_popup = read_catch_popup(game)
-                    if self.log:
+                    if self.csv and (self.log or self.reel_id < LOG_FIRST_REELS):
                         # A popup means the fish was caught; none means it got away
-                        self.log.write(f"{self.reel_id},{time.time():.3f},,,,,"
+                        self.csv.write(f"{self.reel_id},{time.time():.3f},,,,,"
                                        f"{int(self.last_popup is not None)}\n")
                     self.reel_id += 1
-                    print(f"Reel finished ({self.catches} so far)" + (", got an Atlantis pack!" if won_pack else ""))
+                    secs = max(time.time() - reel_t0, 0.1)
+                    print(f"Reel finished ({self.catches} so far, {reel_frames / secs:.0f} looks/s)"
+                          + (", got an Atlantis pack!" if won_pack else ""))
                     if won_pack:
                         close_popup(game)  # (the packs menu is opened next: the popup must be gone)
                         if on_catch:
