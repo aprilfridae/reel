@@ -9,7 +9,6 @@ $py = if (Test-Path "$here\venv312\Scripts\python.exe") { "$here\venv312\Scripts
     --distpath dist --workpath build_tmp --specpath build_tmp --paths . `
     --add-data "$here\templates;templates" --add-data "$here\web\index.html;web" `
     $(if (Test-Path "$here\web\static\logo.png") { "--add-data"; "$here\web\static\logo.png;web\static" }) `
-    $(if (Test-Path "$here\diag_webhook.txt") { "--add-data"; "$here\diag_webhook.txt;." }) `
     --collect-data tzdata `
     --collect-submodules winrt --collect-all dxcam --hidden-import comtypes `
     --hidden-import bot --hidden-import web.app main.py

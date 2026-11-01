@@ -26,7 +26,6 @@ import cv2
 import balance
 import chat
 import cleanup
-import diagnostics
 import gifts
 import index_check
 import launcher
@@ -86,15 +85,8 @@ def main():
         launcher.wait_in_game(game, log=log)
     if CFG["fullscreen"]:
         game.ensure_fullscreen(log)
-    hook = None
-    if CFG["send_diagnostics"] and diagnostics.webhook_url():
-        print(diagnostics.NOTICE, flush=True)
-        _img = game.frame()
-        diagnostics.ping(f"window {_img.shape[1]}x{_img.shape[0]}, ui scale {game.ui_scale(_img):.2f}, "
-                         f"fullscreen {window_is_fullscreen(game.hwnd)}, capture {game.cap.mode}", log=log)
-        hook = lambda extra: diagnostics.upload_fishing(  # noqa: E731
-            fisher.csv_path, fisher.csv_start, os.path.join(HERE, "reel_sample.jpg"), extra, log=log)
-    fisher = Fisher(game, args.lead, log_path=args.log_reels, on_log_ready=hook,
+    # (after the first reels, a one-line summary of how fishing runs on this PC goes to the console; nothing is sent anywhere)
+    fisher = Fisher(game, args.lead, log_path=args.log_reels, on_log_ready=lambda extra: log(f"Fishing on this PC: {extra}"),
                     settings=lambda: webstate.load("fishing.json", {}))
     packs = Packs(game)
     events = EventWatcher(game)
