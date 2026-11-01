@@ -1,6 +1,6 @@
-"""Getting to the Card Market at Spawn.
+﻿"""Getting to the Card Market at Spawn.
 
-Teleport to Spawn, then replay a recorded key sequence exactly (ROUTE), and
+Teleport to Spawn, then replay River's recorded key presses exactly (ROUTE), and
 press E at the "Open Market" prompt. The camera is never moved anywhere in the bot,
 so W/A/S/D always point the same way and the recorded walk works as recorded.
 
@@ -17,7 +17,7 @@ from game import HERE
 from ocr import read_words
 from packs import close_any_menu, close_popup, teleport
 
-# A recording from Spawn with the default camera:
+# River's recording (recordings/20261030-221958), from Spawn with the default camera:
 # (keys held, seconds held, pause after). Replayed exactly as recorded.
 ROUTE = [("aw", 2.356, 0), ("w", 0.200, 0), ("a", 1.532, 0),
          ("aw", 0.754, 0), ("w", 0.400, 0)]
@@ -55,9 +55,9 @@ def market_open(img):
 
 def walk_route(game, until_prompt=True):
     """Replay the route, but only as far as needed: the "Open Market" prompt shows up
-    well before the recorded walk ends (the last legs are just the player shuffling along
+    well before the recorded walk ends (the last legs are just River shuffling along
     the stall), so the walk stops the moment it's on screen. The recorded pauses between
-    legs were the recording's, not the game's, so they're cut to a short beat.
+    legs were River's, not the game's, so they're cut to a short beat.
     True if it stopped because the prompt appeared."""
     def seen():
         return until_prompt and prompt_position(game.frame(), game) is not None
@@ -97,6 +97,29 @@ def _try_prompt(game):
     return False
 
 
+def clear_search(game, log=print):
+    """The artist box beside the sort button is shared by Browse and Who owns?, and keeps what was typed (a
+    Who owns? look-up leaves the artist's name in it): Browse then shows "No cards match your search" and a scan
+    reads nothing. Empty it. True if there was something in it."""
+    from ocr import read_text
+    from ui_keys import clear_field
+    img = game.frame()
+    s = game.ui_scale(img)
+    h, w = img.shape[:2]
+    cx, cy = w / 2 + 323 * s, h / 2 - 294 * s
+    box = img[int(cy - 16 * s):int(cy + 16 * s), int(cx - 95 * s):int(cx + 95 * s)]
+    text = " ".join(read_text(box, scale=3).split()) if box.size else ""
+    if not text or text.lower().startswith("search"):
+        return False
+    log(f"Market: clearing the search box ('{text}')")
+    game.click(cx, cy)
+    game.wait(0.3)
+    clear_field()
+    game.park_mouse()
+    game.wait(1.0)
+    return True
+
+
 def ensure_browse_tab(game):
     """The market opens on whichever tab was used last (My Listings, Requests...), but
     scanning and bidding need Browse, so click it. The chat window, if it's up, covers the
@@ -106,6 +129,7 @@ def ensure_browse_tab(game):
         img = game.frame()
         words = read_words(img, scale=2)
         if _on_browse(words, img):
+            clear_search(game)
             return True
         h, w = img.shape[:2]
         s = game.ui_scale(img)

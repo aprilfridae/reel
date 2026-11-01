@@ -33,7 +33,10 @@ def _open_tab(game, label):
     """Click a market tab by its name (tabs are in the top strip). True if found."""
     img = game.frame()
     h = img.shape[0]
-    spot = next(((x, y) for t, x, y in read_words(img, scale=2) if label.lower() in t.lower() and y < h * 0.3), None)
+    s = game.ui_scale(img)
+    # (the market window is centred, so its rows are placed from the screen's middle, not as a share of its height:
+    # the tab row is 294 px above the middle at UI scale 1 whatever the window size, in fullscreen or not)
+    spot = next(((x, y) for t, x, y in read_words(img, scale=2) if label.lower() in t.lower() and y < h / 2 - 200 * s), None)
     if not spot:
         return False
     game.click(*spot)
@@ -42,9 +45,11 @@ def _open_tab(game, label):
     return True
 
 
-def _header(words, h):
-    """The summary line under the tabs ("Selling 0/6 - Winning 1")."""
-    return " ".join(t for t, x, y in sorted(words, key=lambda w: w[1]) if h * 0.22 < y < h * 0.29)
+def _header(words, h, s=1.0):
+    """The summary line under the tabs ("Selling 0/6 - Winning 1"): 252 px above the screen's middle (the tab row,
+    at 294, is left out: its words would end up in the line)."""
+    mid = h / 2 - 252 * s
+    return " ".join(t for t, x, y in sorted(words, key=lambda w: w[1]) if abs(y - mid) < 20 * s)
 
 
 def read_listings(game):
@@ -58,15 +63,16 @@ def read_listings(game):
     for _ in range(6):
         img = game.frame()
         h = img.shape[0]
+        s = game.ui_scale(img)
         words = read_words(img, scale=2)
-        m = re.search(r"Winning\W*([\dIlOo|]+)", _header(words, h), re.I)  # a lone "1" is often read as "l"
+        m = re.search(r"Winning\W*([\dIlOo|]+)", _header(words, h, s), re.I)  # a lone "1" is often read as "l"
         if m and _num(m.group(1)) > 0:
             break
         game.wait(1.0)
     if not m:
         return None
     winning = _num(m.group(1))
-    sell = re.search(r"Selling\W*([\dIlOo|]+)\s*/", _header(words, h), re.I)
+    sell = re.search(r"Selling\W*([\dIlOo|]+)\s*/", _header(words, h, s), re.I)
     items = _tiles(game, img, words)
     amounts = [i["amount"] for i in items if i["kind"] == "bid" and i["status"] == "winning"]
     return winning, amounts, items, (_num(sell.group(1)) if sell else None)
@@ -110,7 +116,7 @@ def _tiles(game, img, words):
     for f in os.listdir(MINE_DIR):
         os.remove(os.path.join(MINE_DIR, f))
     found = sorted(((x, y, fix_numbers(t)) for t, x, y in words
-                    if y > h * 0.35 and re.fullmatch(r"[\d.,]+[KMBTQ]", fix_numbers(t))), key=lambda a: (a[1], a[0]))
+                    if y > h / 2 - 150 * s and re.fullmatch(r"[\d.,]+[KMBTQ]", fix_numbers(t))), key=lambda a: (a[1], a[0]))
     # A tile can show two amounts (its bid, and "Buy now 10.0T" a line below): the tile's
     # own is the top one, so a lower amount in about the same column belongs to that tile
     amounts = []
@@ -154,7 +160,7 @@ def read_requests(game):
     if not _open_tab(game, "Requests"):
         return None
     img = game.frame()
-    m = re.search(r"yours\W*([\dOIl|]+)\s*/", _header(read_words(img, scale=2), img.shape[0]), re.I)
+    m = re.search(r"yours\W*([\dOIl|]+)\s*/", _header(read_words(img, scale=2), img.shape[0], game.ui_scale(img)), re.I)
     return _num(m.group(1)) if m else None
 
 
