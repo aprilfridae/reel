@@ -18,3 +18,5 @@ number1s/
 serial_glyphs/
 *.png
 !templates/*.png
+
+diag_webhook.txt

@@ -119,7 +119,7 @@ class Reeler:
 
 
 class Fisher:
-    def __init__(self, game, lead=DEFAULT_LEAD, debug=False, log_path=None):
+    def __init__(self, game, lead=DEFAULT_LEAD, debug=False, log_path=None, on_log_ready=None):
         self.game = game
         self.reeler = Reeler(lead)
         self.debug = debug
@@ -132,10 +132,15 @@ class Fisher:
         # A short record of the first reels of every run (reel_log.csv next to the program), to
         # tune the controller to a PC it hasn't seen: how the bar answered E, how the fish moved
         self.csv = self.log
+        self.csv_path = self.csv_start = None
+        self.on_log_ready = on_log_ready  # called once, with a summary line, after LOG_FIRST_REELS reels
+        self.looks = []
         if self.csv is None:
             path = os.path.join(HERE, "reel_log.csv")
             try:
                 if not os.path.exists(path) or os.path.getsize(path) < 300_000:
+                    self.csv_path = path
+                    self.csv_start = os.path.getsize(path) if os.path.exists(path) else 0
                     self.csv = open(path, "a", buffering=1)
                     if self.csv.tell() == 0:
                         self.csv.write("reel,t,zl,zr,fish,hold,caught\n")
@@ -229,8 +234,14 @@ class Fisher:
                                        f"{int(self.last_popup is not None)}\n")
                     self.reel_id += 1
                     secs = max(time.time() - reel_t0, 0.1)
+                    self.looks.append(reel_frames / secs)
                     print(f"Reel finished ({self.catches} so far, {reel_frames / secs:.0f} looks/s)"
                           + (", got an Atlantis pack!" if won_pack else ""))
+                    if self.on_log_ready and self.csv_path and self.reel_id == LOG_FIRST_REELS:
+                        mid = sorted(self.looks)[len(self.looks) // 2]
+                        self.on_log_ready(f"window {img.shape[1]}x{img.shape[0]}, ui scale {game.ui_scale(img):.2f}, "
+                                          f"median {mid:.0f} looks/s, {self.reeler.lead:.2f}s lead")
+                        self.on_log_ready = None
                     if won_pack:
                         close_popup(game)  # (the packs menu is opened next: the popup must be gone)
                         if on_catch:

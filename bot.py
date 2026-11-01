@@ -25,6 +25,7 @@ import cv2
 
 import balance
 import chat
+import diagnostics
 import gifts
 import index_check
 import launcher
@@ -81,7 +82,12 @@ def main():
         launcher.wait_in_game(game, log=log)
     if CFG["fullscreen"]:
         game.ensure_fullscreen(log)
-    fisher = Fisher(game, args.lead, log_path=args.log_reels)
+    hook = None
+    if CFG["send_diagnostics"] and diagnostics.webhook_url():
+        print(diagnostics.NOTICE, flush=True)
+        hook = lambda extra: diagnostics.upload_fishing(  # noqa: E731
+            fisher.csv_path, fisher.csv_start, os.path.join(HERE, "reel_sample.jpg"), extra, log=log)
+    fisher = Fisher(game, args.lead, log_path=args.log_reels, on_log_ready=hook)
     packs = Packs(game)
     events = EventWatcher(game)
     chores = gifts.Chores(game, log=log)
