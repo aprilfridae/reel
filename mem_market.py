@@ -61,7 +61,10 @@ def _could_be_name(t):
     s = _strip_icon(raw)
     if not s or s.startswith("+") or s.startswith("#") or s.upper() in RARITIES or set(s) <= set("★☆ "):
         return False
-    if re.match(r"(Underground RNG|Earns|Start|Buy\s*now)\b|GRADE$|\d{1,2}$|(?:by|left)\b", s, re.I) or _NOT_NAME.match(s):
+    if re.match(r"(Underground RNG|Earns|Start|Buy\s*now)\b|GRADE$|\d{1,2}$|by\s", s, re.I) or _NOT_NAME.match(s):
+        return False
+    # the listing's own lines under the card: time left ("4h 51m left"), a bid or price ("50.0B"), "by seller"
+    if re.search(r"\bleft$", s, re.I) or re.fullmatch(r"(?:\d+\s*[dhms]\s*)+", s, re.I) or re.fullmatch(r"[\d.,]+\s*[KMBTQ]?", s, re.I):
         return False
     g = mem_gui.gui()
     if g is not None and g.mb._class_name(t[4]) == "TextButton":
@@ -72,7 +75,13 @@ def _could_be_name(t):
 def parse(texts):
     """A listing's fields from its texts (see the module doc)."""
     card = {"name": None, "serial": None, "rarity": None}
-    top = min((t for t in texts if _could_be_name(t)), key=lambda t: t[2], default=None)
+    # the name is the topmost label ABOVE the rarity / stars row (the card's face); everything under it is the
+    # listing's own lines (price, time left, seller), which are never the name. A card whose name hasn't loaded
+    # yet has none, rather than borrowing one of those.
+    face = [t[2] for t in texts if _strip_icon(t[0]).upper() in RARITIES or set(t[0]) <= set("★☆ ")]
+    limit = min(face) if face else None
+    top = min((t for t in texts if _could_be_name(t) and (limit is None or t[2] < limit)),
+              key=lambda t: t[2], default=None)
     if top:
         card["name"] = _strip_icon(top[0]) or top[0]
     for t, x, y, parent, _ in texts:
