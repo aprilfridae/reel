@@ -81,8 +81,8 @@ class Watcher:
         notice = read_notice(img, box)
         if not notice:
             return False
-        if self.last and self.last[0] == notice["text"] and now - self.last[1] < 120:
-            return False
+        if self.last and (self.last[0] == notice["text"] and now - self.last[1] < 120 or now - self.last[1] < 10):
+            return False  # (one notice stays up a few seconds, and its text reads a little differently each look)
         self.last = (notice["text"], now)
         os.makedirs(PICS, exist_ok=True)
         name = time.strftime("%Y%m%d-%H%M%S") + ".jpg"

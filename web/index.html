@@ -1387,9 +1387,11 @@ async function refresh() {
     fishEl.textContent = fish.state || "—";
     fishEl.className = `fish-ind ${fish.state || ""}`;
   }
-  // memory-polled outbid (adds to the CV-read ones)
+  // memory-polled outbid (adds to the CV-read ones; one notice seen both ways is shown once)
   if (mem.outbid && mem.outbid.length) {
-    s.outbid = [...(s.outbid || []), ...mem.outbid].sort((a, b) => (b.ts || 0) - (a.ts || 0));
+    const cv = s.outbid || [];
+    const extra = mem.outbid.filter(m => !cv.some(c => Math.abs((c.ts || 0) - (m.ts || 0)) < 20));
+    s.outbid = [...cv, ...extra].sort((a, b) => (a.ts || 0) - (b.ts || 0));  // oldest first, like outbid.json
   }
   // memory-polled trade incoming (adds to the CV-read one)
   if (mem.trade_incoming && mem.trade_incoming.incoming && !s.trade?.incoming) {
