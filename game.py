@@ -60,14 +60,37 @@ def find_roblox():
     def cb(hwnd, _):
         buf = ctypes.create_unicode_buffer(256)
         user32.GetWindowTextW(hwnd, buf, 256)
-        if buf.value == "Roblox" and user32.IsWindowVisible(hwnd):
+        cls = ctypes.create_unicode_buffer(256)
+        user32.GetClassNameW(hwnd, cls, 256)
+        pid = wt.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        # Check by window title or by process name (Roblox in fullscreen may have empty title)
+        is_roblox = (buf.value == "Roblox"
+                     or (buf.value == "" and cls.value in ("WINDOWSCLIENT", "RobloxPlayerBeta")))
+        # Also check if the process is RobloxPlayerBeta (fullscreen may not set the title)
+        if not is_roblox:
+            try:
+                import psutil
+                p = psutil.Process(pid.value)
+                if "roblox" in p.name().lower():
+                    is_roblox = True
+            except Exception:
+                pass
+        if is_roblox:
             found.append(hwnd)
         return True
 
     user32.EnumWindows(cb, 0)
-    # Prefer the normal Roblox player (class WINDOWSCLIENT) over e.g. the Store app's frame
-    found.sort(key=lambda hwnd: window_class(hwnd) != "WINDOWSCLIENT")
-    return found[0] if found else None
+    # Prefer visible windows, then WINDOWSCLIENT class
+    found.sort(key=lambda hwnd: (not user32.IsWindowVisible(hwnd), window_class(hwnd) != "WINDOWSCLIENT"))
+    if found:
+        return found[0]
+    # Fallback: try FindWindow with Roblox's class name
+    for cls_name in ("WINDOWSCLIENT", "RobloxPlayerBeta", "Roblox"):
+        hwnd = user32.FindWindowW(cls_name, None)
+        if hwnd:
+            return hwnd
+    return None
 
 
 class MONITORINFO(ctypes.Structure):

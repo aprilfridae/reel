@@ -134,6 +134,13 @@ def state():
         "trade": trade,
         "packlog": {"log": webstate.load("packlog.json", [])[-80:], "roll": webstate.load("packroll.json", {})},
         "outbid": webstate.load("outbid.json", [])[-20:],
+        "mem": {  # live memory-polled data (always fresh)
+            "balance": webstate.load("balance.json", {}),
+            "fishing": webstate.load("fishing.json", {}),
+            "event": webstate.load("mem_event.json", {}),
+            "outbid": webstate.load("mem_outbid.json", []),
+            "trade_incoming": webstate.load("mem_trade.json", {}),
+        },
         "fishing": {**webstate.load("fishcal.json", {}), "settings": webstate.load("fishing.json", {})},
         "tz": tz.info(),
         "now": time.time(),  # so the page's countdowns use this PC's clock

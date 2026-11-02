@@ -23,7 +23,8 @@ from datetime import datetime
 
 import cv2
 
-import balance
+import balance  # still available (for the .exe build)
+from memory_backend import MemoryBackend  # memory-based balance
 import chat
 import cleanup
 import gifts
@@ -42,7 +43,9 @@ import updater
 import webstate
 from config import load as load_config
 from events import EventWatcher
-from fisher import DEFAULT_LEAD, Fisher
+from fisher import DEFAULT_LEAD, Fisher  # still available
+from mem_fisher import MemFisher
+from mem_catch_popup import read_catch_popup_mem
 from game import HERE, TEMPLATES, Game, StopBot, WindowLost, find_roblox, window_is_fullscreen
 from packs import Packs, close_any_menu, close_popup, teleport_to_fishing
 
@@ -86,8 +89,9 @@ def main():
     if CFG["fullscreen"]:
         game.ensure_fullscreen(log)
     # (after the first reels, a one-line summary of how fishing runs on this PC goes to the console; nothing is sent anywhere)
-    fisher = Fisher(game, args.lead, log_path=args.log_reels, on_log_ready=lambda extra: log(f"Fishing on this PC: {extra}"),
-                    settings=lambda: webstate.load("fishing.json", {}))
+    fisher = MemFisher(game, args.lead, log_path=args.log_reels, on_log_ready=lambda extra: log(f"Fishing on this PC: {extra}"),
+                       settings=lambda: webstate.load("fishing.json", {}))
+    fisher.start()
     packs = Packs(game)
     events = EventWatcher(game)
     chores = gifts.Chores(game, log=log)
@@ -168,15 +172,17 @@ def main():
         return mw["value"]
 
     def check_atlantis():
-        n = packs.open_pack("atlantis", should_stop=interrupted)
-        if n:
-            log(f"Opened Atlantis pack x{n}")
-            if fisher.last_popup is not None and not os.path.exists(ATLANTIS_POPUP):
-                cv2.imwrite(ATLANTIS_POPUP, fisher.last_popup)
+        won_pack, _ = read_catch_popup_mem(game, mb)
+        if won_pack:
+            n = packs.open_pack("atlantis", should_stop=interrupted)
+            if n:
+                log(f"Opened Atlantis pack x{n}")
 
     state = {"pack": None, "last_full": 0.0, "ended": None}
     talk = chat.Chat(game)
-    coins = balance.Balance(game)
+    mb = MemoryBackend()
+    mb.start()
+    coins = None  # replaced by mb.get_balance()
     web = {"checked": 0.0, "wants": False}
 
     def chores_due():
@@ -392,8 +398,13 @@ def main():
         outbids.poll(img)
         if talk.due():
             talk.read(img)
-        if coins.due():
-            coins.update(img)
+        # balance from memory instead of OCR
+        try:
+            bal = mb.get_balance()
+            if bal:
+                webstate.save("balance.json", {"value": bal, "at": datetime.now().strftime("%H:%M:%S")})
+        except Exception:
+            pass
         rolled_during_reel = events.read_deferred()
         events.update_banner(img)
         raw_pack = events.pack
@@ -578,8 +589,7 @@ def main():
                    or session_due() or market_work()
                    or once("packs") or once("index") or mode() != fishing_mode,
                    on_catch=check_atlantis,
-                   on_stuck=lambda: teleport_to_fishing(game),
-                   watch=watch, act=act)
+                   on_stuck=lambda: teleport_to_fishing(game))
 
     try:
         while True:

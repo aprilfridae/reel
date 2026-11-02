@@ -31,6 +31,7 @@ DEFAULTS = {
     "rebirth_fraction": 0.25,    # ...this share of the coins on hand
     "rebirth_forfeits_bids": True,  # coins in active Market bids are lost on a rebirth: go ahead anyway (false = cancel)
     "claim_gifts": True,         # playtime gifts + the daily spin
+    "memory_polling": True,      # read game state from memory (balance, fishing, event, outbid, trade) for the website
 }
 
 

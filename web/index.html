@@ -84,6 +84,12 @@
   .bal .tile { width: 32px; height: 32px; }
   .bal b { display: block; font: 700 18px/1.1 var(--f-title); }
   .bal #balance-at { display: block; font-size: 11px; color: var(--dim); }
+  .fish-live { flex-direction: column; gap: 2px; align-items: flex-start; }
+  .fish-live b { font: 700 14px/1.1 var(--f-title); }
+  .fish-ind { text-transform: capitalize; }
+  .fish-ind.biting { color: #7f7; }
+  .fish-ind.caught { color: #ff7; }
+  .fish-ind.waiting { color: var(--dim); }
   #menu-btn { display: none; }
 
   /* controls */
@@ -131,6 +137,11 @@
   .serial { position: absolute; top: 12px; left: 12px; font: 500 11px/20px var(--f-mono); padding: 0 8px; border: 1px solid var(--line);
             border-radius: 4px; background: var(--bg); color: var(--fg); }
   .serial.one { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+  .pack { position: absolute; top: 12px; right: 12px; font: 500 10px/18px var(--f-mono); padding: 0 6px;
+    border: 1px solid var(--line); color: var(--dim); background: rgba(10,10,10,.6); border-radius: 2px; }
+  .cname { font: 500 13px/1.2 var(--f-sans); margin-bottom: 2px; overflow-wrap: anywhere; }
+  .cname .eyebrow { font-size: 9px; opacity: .7; }
+  .grade { font: 400 10px/1 var(--f-mono); color: var(--dim); margin-left: 6px; }
   .mbody { padding: 16px; display: grid; gap: 14px; flex: 1; }
   .mends { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
   .countdown { font: 700 22px/1 var(--f-title); letter-spacing: .02em; }
@@ -466,6 +477,10 @@
       <div class="bal" title="Coins you have right now (coins held in your active bids aren't included)">
         <span class="tile" id="coin-tile"></span>
         <div><b id="balance">…</b><span id="balance-at"></span></div>
+      </div>
+      <div class="bal fish-live" title="What the fishing minigame is doing right now (read from Roblox memory)">
+        <span class="eyebrow">fishing</span>
+        <b id="fish-state">—</b>
       </div>    </div>
   </header>
 
@@ -593,8 +608,10 @@ function cardHtml(c, i) {
     <div class="mart">${c.image ? `<img class="zoomable" src="/static/cards/${esc(c.image)}?t=${esc(c.seen_at)}" alt="" title="click to enlarge"
         data-full="/static/cards/${esc(c.image)}?t=${esc(c.seen_at)}"
         data-cap="${esc([c.name || "", "#" + (c.serial || "?"), c.seller ? "seller " + c.seller : "", price].filter(Boolean).join(" · "))}">` : ""}
-      <span class="serial ${c.serial === "1" ? "one" : ""}">#${esc(c.serial)}</span></div>
+      <span class="serial ${c.serial === "1" ? "one" : ""}">#${esc(c.serial)}</span>
+      ${c.pack ? `<span class="pack">${esc(c.pack)}</span>` : ""}</div>
     <div class="mbody">
+      ${c.name ? `<div class="cname"><b>${esc(c.name)}</b>${c.earnings ? ` <span class="eyebrow">${esc(c.earnings)}</span>` : ""}${c.grade ? ` <span class="grade">grade ${esc(c.grade)}</span>` : ""}</div>` : ""}
       <div class="mends"><span class="eyebrow">ends in</span>${c.ends_ts
         ? `<b class="countdown" data-ends="${esc(c.ends_ts)}">${esc(c.time_left)}</b>`
         : `<b class="countdown">${esc(c.time_left || "?")}</b>`}</div>
@@ -1229,9 +1246,27 @@ async function refresh() {
   $("status").textContent = st.text ? `bot: ${st.text}` : "bot status unknown";
   $("status").title = st.at || "";
   setLive(true, st.at ? `online · ${st.at}` : "online");
-  const bal = s.balance || {};
+  // memory-polled data (always fresh, read directly from Roblox memory)
+  const mem = s.mem || {};
+  const memBal = mem.balance || {};
+  const bal = (memBal.value ? memBal : s.balance) || {};  // prefer memory-read balance
   $("balance").textContent = bal.value || "?";
-  $("balance-at").textContent = bal.at ? `as of ${bal.at}` : "";
+  $("balance-at").textContent = bal.at ? `as of ${bal.at}` + (memBal.value ? " · live" : "") : "";
+  // fishing state indicator (from memory)
+  const fish = mem.fishing || {};
+  const fishEl = $("fish-state");
+  if (fishEl) {
+    fishEl.textContent = fish.state || "—";
+    fishEl.className = `fish-ind ${fish.state || ""}`;
+  }
+  // memory-polled outbid (adds to the CV-read ones)
+  if (mem.outbid && mem.outbid.length) {
+    s.outbid = [...(s.outbid || []), ...mem.outbid].sort((a, b) => (b.ts || 0) - (a.ts || 0));
+  }
+  // memory-polled trade incoming (adds to the CV-read one)
+  if (mem.trade_incoming && mem.trade_incoming.incoming && !s.trade?.incoming) {
+    s.trade = {...(s.trade || {}), incoming: mem.trade_incoming.incoming};
+  }
   const nowSecs = Date.now() / 1000 + clockOffset;
   const live = ((s.market || {}).cards || []).filter(c => !c.ends_ts || c.ends_ts > nowSecs).length;
   $("nav-market-count").textContent = live ? String(live) : "";

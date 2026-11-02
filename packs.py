@@ -9,6 +9,10 @@ import numpy as np
 
 from game import HERE, TEMPLATES
 from ocr import read_text, read_words
+try:
+    from mem_catch_popup import read_catch_popup_mem as _read_catch_popup_mem
+except ImportError:
+    _read_catch_popup_mem = None
 
 EVENT_PACKS = ["blood_moon", "eclipse", "volcano", "acid", "tsunami", "storm", "meteor"]
 # The nightly pack session: Rainbow and rarer, plus every event pack, rarest first.
@@ -169,6 +173,15 @@ def read_catch_popup(game, timeout=2.5):
 
 POPUP_OCR_AFTER = 0.22  # seconds after the popup shows: read its text
 POPUP_DECIDE_AFTER = 0.45  # ...and if nothing says Atlantis by now, it isn't
+
+
+def read_catch_popup_mem(game, mb, timeout=2.5):
+    """Memory-reading replacement for read_catch_popup. Returns
+    (got_atlantis, None) — no popup image is captured since we read
+    text directly from Roblox memory instead of the screen."""
+    if _read_catch_popup_mem is None:
+        return False, None
+    return _read_catch_popup_mem(game, mb, timeout=timeout)
 
 
 CLOSE_BUTTONS = ("close_daily", "close_gifts", "close_market", "close_menu")  # the menus' red X's differ
