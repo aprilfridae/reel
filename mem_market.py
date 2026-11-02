@@ -52,15 +52,29 @@ def _grid(mb):
     return None
 
 
+_NOT_NAME = re.compile(r"^(price history|top 10 sold|top 10 bids|bid|buy|sort\b|auction only|show more|loading)\b", re.I)
+
+
+def _could_be_name(t):
+    """The artist name is a label on the card. The listing's own buttons ('Price history', 'Top 10 sold') are not."""
+    raw = t[0] or ""
+    s = _strip_icon(raw)
+    if not s or s.startswith("+") or s.startswith("#") or s.upper() in RARITIES or set(s) <= set("★☆ "):
+        return False
+    if re.match(r"(Underground RNG|Earns|Start|Buy\s*now)\b|GRADE$|\d{1,2}$|(?:by|left)\b", s, re.I) or _NOT_NAME.match(s):
+        return False
+    g = mem_gui.gui()
+    if g is not None and g.mb._class_name(t[4]) == "TextButton":
+        return False
+    return True
+
+
 def parse(texts):
     """A listing's fields from its texts (see the module doc)."""
     card = {"name": None, "serial": None, "rarity": None}
-    top = min((t for t in texts if t[0] and not t[0].startswith("+") and not t[0].startswith("#")
-               and t[0].upper() not in RARITIES and not set(t[0]) <= set("★☆ ")
-               and not re.match(r"(Underground RNG|Earns)\b|GRADE$|\d{1,2}$", t[0], re.I)),  # (footer lines, the grade)
-              key=lambda t: t[2], default=None)
+    top = min((t for t in texts if _could_be_name(t)), key=lambda t: t[2], default=None)
     if top:
-        card["name"] = top[0]
+        card["name"] = _strip_icon(top[0]) or top[0]
     for t, x, y, parent, _ in texts:
         s = _strip_icon(t)
         if parent == "FirstTen" and re.fullmatch(r"#\d+", s):
@@ -93,6 +107,31 @@ def parse(texts):
     return card
 
 
+def _is_cancel(text):
+    """The bid / buy window's Cancel button. Its word can sit on a child label and can start with an icon."""
+    s = mem_gui._norm(_strip_icon(text))
+    return s == "cancel" or s.startswith("cancel ")
+
+
+def _cancel_button():
+    """The showing Cancel button in the market, or None. Looked up fresh (a cached position lags the moment the
+    window opens, and a click on the old spot misses, which leaves the window up)."""
+    gui = mem_gui.gui()
+    if gui is None:
+        return None
+    sg = next((s for s in gui.mb._children(gui.mb.player_gui) if gui.mb._name(s) == "MarketUI"), None)
+    if sg is None:
+        return None
+    for text, inst in mem_gui.buttons(sg, depth=16, max_nodes=8000):
+        if not _is_cancel(text):
+            continue
+        label = gui.mb._find_child(inst, name="Label")
+        # the button frame's own position can lag off-screen the moment the window opens; the word on it is where it is
+        if gui.is_shown(inst) or (label and gui.is_shown(label)):
+            return inst
+    return None
+
+
 def dialog_words():
     """The bid window's texts as [(text, x, y)] (whole labels, screen pixels), plus ("<textbox>", x, y) for its amount
     box, or None if no such window is showing (or memory can't tell). The window is the frame around its Cancel
@@ -102,16 +141,16 @@ def dialog_words():
         return None
     try:
         mb = gui.mb
-        cancel = gui.find(text="Cancel", screen="MarketUI", want_obj=True)
+        cancel = _cancel_button()
         if not cancel:
             return None
-        node = cancel[2]
-        for _ in range(5):  # up to the window: the first frame above Cancel that holds more than its button row
+        node = cancel
+        for _ in range(12):  # up to the window: the first frame above Cancel that holds more than its button row
             node = mb._parent(node)
             if node is None:
                 return None
             texts = [t for t in _texts(mb, node, depth=8) if gui.is_shown(t[4])]
-            if any(re.match(r"(Bid on|Buy)\b", t[0], re.I) for t in texts):
+            if any(re.match(r"(Bid on|Buy)\b", _strip_icon(t[0]), re.I) for t in texts):
                 out = [(t[0], t[1], t[2]) for t in texts]
                 for d, o in mb._walk(node, depth=8, max_nodes=200):
                     if mb._class_name(o) == "TextBox" and gui._ok(o):

@@ -1,2 +1,2 @@
 """The version of this build."""
-VERSION = "1.2.31"
+VERSION = "1.2.32"

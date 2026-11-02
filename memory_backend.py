@@ -89,7 +89,8 @@ class MemoryBackend:
                     if (self._class_name(dm) == "DataModel"
                             and self._class_name(players) == "Players"
                             and self._class_name(lp) == "Player"
-                            and self._class_name(pg) == "PlayerGui"):
+                            and self._class_name(pg) == "PlayerGui"
+                            and self._has_screen(pg, "CardsUI")):
                         self.data_model, self.players = dm, players
                         self.local_player, self.player_gui = lp, pg
                         print(f"[+] cache hit: DataModel 0x{dm:x}  Players 0x{players:x}")
@@ -132,7 +133,8 @@ class MemoryBackend:
         if not structs:
             raise RuntimeError("could not locate DataModel — is the game loaded?")
         wanted = np.array(sorted(structs), dtype=np.uint64)
-        dm = players = None
+        found = []  # Roblox keeps more than one DataModel (the place, and a shell). The shell's
+        # PlayerGui is empty, so the first one found is often the wrong one: the walk then can't see Teleports.
         for addr, d in self._chunks(regions):
             pad = (8 - addr % 8) % 8
             usable = (len(d) - pad) // 8 * 8
@@ -149,24 +151,30 @@ class MemoryBackend:
                     cand, par = self._parent(inst), None  # a Player: its parent should be Players
                     par = cand and self._parent(cand)
                 if cand and par and self._class_name(cand) == "Players" and self._class_name(par) == "DataModel":
-                    dm, players = par, cand
-                    print(f"[+] Players 0x{cand:x} -> DataModel 0x{par:x}")
-                    break
-            if dm:
-                break
+                    if any(par == d0 for d0, _ in found):
+                        continue
+                    found.append((par, cand))
+                    print(f"[+] Players 0x{cand:x} -> DataModel 0x{par:x}", flush=True)
+                    lp, pg = self._local_player_gui(cand)
+                    if lp and self._has_screen(pg, "CardsUI"):
+                        found = [(par, cand)]  # this is the place you're standing in; the others are empty shells
+                        break
+            else:
+                continue
+            break
 
-        if not dm:
+        if not found:
             raise RuntimeError("could not locate DataModel — is the game loaded?")
 
-        lp = pg = None
-        for p in self._children(players):
-            if self._class_name(p) == "Player":
-                pg_candidate = self._find_child(p, cls="PlayerGui")
-                if pg_candidate:
-                    lp, pg = p, pg_candidate
-                    break
-        if not lp:
+        bound = []
+        for dm, players in found:
+            lp, pg = self._local_player_gui(players)
+            if lp:
+                bound.append((dm, players, lp, pg))
+        if not bound:
             raise RuntimeError("local player not found")
+        # the place you're standing in is the DataModel whose menus (CardsUI) are actually showing
+        dm, players, lp, pg = next((b for b in bound if self._has_screen(b[3], "CardsUI")), bound[0])
 
         self.data_model, self.players = dm, players
         self.local_player, self.player_gui = lp, pg
@@ -176,22 +184,38 @@ class MemoryBackend:
         print(f"[+] AbsolutePosition offset: 0x{self._abs_pos_off:x}")
         self._started = True
 
-        try:
-            with open(self.cache_path, "w") as f:
-                json.dump({"data_model": dm, "players": players,
-                           "local_player": lp, "player_gui": pg}, f)
-        except Exception:
-            pass
+        if self._has_screen(pg, "CardsUI"):
+            try:
+                with open(self.cache_path, "w") as f:
+                    json.dump({"data_model": dm, "players": players,
+                               "local_player": lp, "player_gui": pg}, f)
+            except Exception:
+                pass
 
     def close(self):
         self.r.close()
 
+    def _local_player_gui(self, players):
+        """(player, PlayerGui) for the first player that has one, or (None, None)."""
+        for p in self._children(players):
+            if self._class_name(p) == "Player":
+                pg = self._find_child(p, cls="PlayerGui")
+                if pg:
+                    return p, pg
+        return None, None
+
+    def _has_screen(self, gui, name):
+        """True when this PlayerGui is showing a ScreenGui of this name (CardsUI is the game's own menus)."""
+        return any(self._name(c) == name and self._class_name(c) == "ScreenGui" for c in self._children(gui))
+
     def alive(self):
-        """Is the game we found still there (the same Roblox, the same DataModel)? A reconnect builds a new one."""
+        """Is the game we found still there (the same Roblox, the same DataModel, the menus still on it)?
+        A reconnect builds a new one. An empty shell DataModel also fails this, so the next read finds the real one."""
         try:
             return (self.r.pid == Reader._find_pid("RobloxPlayerBeta.exe")
                     and self._class_name(self.player_gui) == "PlayerGui"
-                    and self._parent(self._parent(self.player_gui)) == self.players)
+                    and self._parent(self._parent(self.player_gui)) == self.players
+                    and self._has_screen(self.player_gui, "CardsUI"))
         except Exception:
             return False
 

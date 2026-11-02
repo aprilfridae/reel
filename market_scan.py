@@ -83,6 +83,8 @@ def _dialog_text(game):
 def top_bidder(game, bid):
     """Open the BID window for this listing, read 'Top bid: X by Y', and Cancel. Never places a bid. The window is
     waited for only as long as it takes to show (and to close), instead of fixed pauses."""
+    if _bid_window_open() and not _cancel_dialog(game):
+        return {}  # a window already up would catch this click
     game.click(bid[0], bid[1])
     game.park_mouse()
     words, text = [], ""
@@ -104,16 +106,7 @@ def top_bidder(game, bid):
     m = re.search(r"need\s+at\s+least\s+([\d.,]+\s*[KMBTQ]?)", text, re.I)
     if m:
         result["min_next_bid"] = m.group(1).replace(" ", "")
-    cancel = [(x, y) for t, x, y in words if t.lower().startswith("cancel")]
-    if cancel:
-        game.click(*cancel[0])
-    game.park_mouse()
-    end = time.time() + 1.2
-    while time.time() < end:  # until the window is gone
-        game.wait(0.05)
-        _, text2 = _dialog_text(game)
-        if not re.search(r"Top\s*bid|Starting\s*bid|need\s+at\s+least", text2, re.I):
-            break
+    _cancel_dialog(game, force=True)  # the window stays until Cancel is pressed; leaving it up blocks everything after
     return result
 
 
@@ -134,22 +127,99 @@ def wait_for_listings(game, timeout=10):
     return False
 
 
+def _sort_control():
+    """(sort button, its menu). The word 'Sort: ...' is on the button's Label, and the button's own text is empty,
+    so it has to be found from that label. The menu is a frame beside the button; it is not reached by walking the
+    listings (those are thousands of objects and the walk stops first)."""
+    g = mem_gui.gui()
+    if g is None:
+        return None, None
+    mb = g.mb
+    sg = next((s for s in mb._children(mb.player_gui) if mb._name(s) == "MarketUI"), None)
+    if sg is None:
+        return None, None
+    lab = None
+    for d, o in mb._walk(sg, depth=8, max_nodes=1500):
+        if mb._class_name(o) not in ("TextLabel", "TextButton"):
+            continue
+        if (mb._content_text(o) or "").lower().lstrip().startswith("sort:"):
+            lab = o
+            break
+    if lab is None:
+        return None, None
+    btn = lab if mb._class_name(lab) == "TextButton" else mb._parent(lab)
+    menu, node = None, btn
+    for _ in range(4):
+        parent = mb._parent(node)
+        if parent is None:
+            break
+        for c in mb._children(parent):
+            if c == node or mb._class_name(c) != "Frame":
+                continue
+            for d, o in mb._walk(c, depth=4, max_nodes=40):
+                t = (mb._content_text(o) or "").strip().lower()
+                if t == "sort by" or "serial" in t:
+                    menu = c
+                    break
+            if menu is not None:
+                break
+        if menu is not None:
+            break
+        node = parent
+    return btn, menu
+
+
+def _sort_label(btn):
+    """What the sort button currently says ('Sort: Newest'). The words are on its Label, not on the button."""
+    g = mem_gui.gui()
+    if g is None or btn is None:
+        return ""
+    lab = g.mb._find_child(btn, name="Label")
+    return g.mb._content_text(lab or btn) or ""
+
+
+def _serial_option(menu):
+    """The menu's 'Lowest serial' button, once the menu is open (it stays in memory while closed, just hidden)."""
+    g = mem_gui.gui()
+    if g is None or menu is None:
+        return None
+    mb = g.mb
+    for d, o in mb._walk(menu, depth=3, max_nodes=40):
+        if mb._class_name(o) != "TextButton" or not g.is_shown(o):
+            continue
+        if "serial" in (mb._content_text(o) or "").lower():
+            return o
+    return None
+
+
 def set_sort_lowest_serial(game):
     """Open the Sort dropdown and pick 'Lowest serial' (checked by reading the sort label back)."""
     wait_for_listings(game)
+    _cancel_dialog(game)  # a bid window left open would take the click
     for _ in range(4):
-        label = mem_gui.read(text="Sort:", screen="MarketUI")
-        if not label:
+        btn, menu = _sort_control()
+        if btn is None or not mem_gui.shown(btn):
             game.wait(0.5)
             continue
-        if "lowest serial" in label[0].lower():
+        if "lowest serial" in _sort_label(btn).lower():
             return True
-        game.click(label[1], label[2])
-        game.wait(0.8)
-        opt = mem_gui.locate(text="Lowest serial", screen="MarketUI")
-        game.click(*(opt[:2] if opt else label[1:]))  # (no option: close the dropdown and look again)
+        # the sort button toggles the menu, so it is only clicked while the menu is closed
+        if _serial_option(menu) is None:
+            mem_gui.click(game, btn)
+            game.wait(0.45)
+            btn, menu = _sort_control()
+        opt = _serial_option(menu)
+        if opt is None:
+            game.wait(0.3)
+            continue
+        mem_gui.click(game, opt)
         game.park_mouse()
-        game.wait(1.5)
+        end = time.time() + 1.2
+        while time.time() < end:
+            game.wait(0.1)
+            btn, _ = _sort_control()
+            if btn and "lowest serial" in _sort_label(btn).lower():
+                return True
     return False
 
 
@@ -230,12 +300,41 @@ def _find_once(game, want, strict=False):
     return (at[0], at[1], at[0]), card
 
 
-def _cancel_dialog(game):
-    cancel = [(x, y) for t, x, y in _dialog_words(game) if t.lower().startswith("cancel")]
-    if cancel:
-        game.click(*cancel[0])
-    game.park_mouse()
-    game.wait(0.6)
+def _bid_window_open():
+    """Is the bid or buy window's Cancel button showing?"""
+    g = mem_gui.gui()
+    if g is not None:  # a cached Cancel spot is where the button was, not where it is now
+        g._memo = {k: v for k, v in g._memo.items()
+                   if not (isinstance(k[0], str) and "cancel" in k[0].lower())}
+    if mem_market._cancel_button():
+        return True
+    return mem_gui.locate(text="Cancel", screen="MarketUI", contains=True) is not None
+
+
+def _cancel_dialog(game, force=False):
+    """Press Cancel until the bid / buy window is gone. One click can miss (the button's position lags the moment
+    the window appears), and a window left open catches every later click, which is how a scan gets stuck."""
+    for _ in range(5):
+        open_ = _bid_window_open()
+        if not open_ and not force:
+            return True
+        force = False
+        btn = mem_market._cancel_button()
+        if btn is not None:
+            mem_gui.click(game, btn)
+        else:
+            spot = mem_gui.locate(text="Cancel", screen="MarketUI", contains=True)
+            if spot:
+                game.click(spot[0], spot[1])
+                game.park_mouse()
+            elif not open_:
+                return True
+        end = time.time() + 0.8
+        while time.time() < end:
+            game.wait(0.1)
+            if not _bid_window_open():
+                return True
+    return not _bid_window_open()
 
 
 def place_bid(game, want, amount, dry_run=False):
@@ -459,6 +558,7 @@ def scan(game, read_bidders=True, max_pages=60, log=print, should_stop=lambda: F
         elif "start" in card:
             card["top_bidder"] = None
         found.append(_finish(card))
+    _cancel_dialog(game)  # a bid window left open blocks My Listings and the teleport back
     log(f"Scanned {len(cards)} listing(s), {len(found)} #1-#3 "
         f"(loading the list {t1 - t0:.0f} s, top bidders {time.time() - t1:.0f} s)")
     return found
