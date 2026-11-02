@@ -73,29 +73,31 @@ def main():
     if cfg["auto_update"]:
         updater.start()
 
-    # Memory poller: reads game state from Roblox memory in the background
-    # (balance, fishing state, event banner, outbid, trade requests) and
-    # writes it to web/data/ so the website is always up to date.
-    mem_poller = None
-    mb = None
-    if cfg.get("memory_polling", True):
-        try:
-            from memory_backend import MemoryBackend
+    # Memory poller: reads game state from Roblox memory in the background (balance, fishing state, event
+    # banner, outbid) for the website. It shares the bot's memory reader, and waits for it in the background
+    # (Roblox may not be open yet, and finding the game in memory takes a while the first time).
+    poller = {}
+    if cfg["memory_polling"]:
+        def start_poller():
+            import time
+            from memory_backend import get_backend
             from mem_poller import MemoryPoller
-            mb = MemoryBackend()
-            mb.start()
-            mem_poller = MemoryPoller(mb, log=lambda m: print(f"[mem] {m}", flush=True))
-            mem_poller.start()
-        except Exception as e:
-            print(f"(memory polling unavailable: {e})", flush=True)
+            while True:
+                try:
+                    mb = get_backend()
+                    break
+                except Exception as e:
+                    print(f"(memory polling waits: {e})", flush=True)
+                    time.sleep(30)
+            poller["p"] = MemoryPoller(mb, log=lambda m: print(f"[mem] {m}", flush=True))
+            poller["p"].start()
+        threading.Thread(target=start_poller, daemon=True, name="memory-poller-start").start()
 
     import bot
     bot.main()
 
-    if mem_poller:
-        mem_poller.stop()
-    if mb:
-        mb.close()
+    if poller.get("p"):
+        poller["p"].stop()
     if updater.pending():
         updater.install_and_restart()
 

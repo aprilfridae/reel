@@ -23,7 +23,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from memory_backend import MemoryBackend
+from memory_backend import get_backend
 from mem_catch_popup import read_catch_popup_mem
 
 import ctypes as _ct
@@ -32,6 +32,7 @@ _user32 = _ct.windll.user32
 CAST_DELAY = 0.3
 RECAST_EVERY = 0.4
 STUCK_AFTER = 15
+WATCH_EVERY = 0.25  # seconds between the bot's looks at the screen (events, trades, chat) while not reeling
 
 
 def _find_roblox_hwnd():
@@ -73,8 +74,9 @@ def _focus(hwnd):
 
 
 class MemFisher:
-    def __init__(self, debug=False, log_path=None, on_log_ready=None, settings=None):
-        self.mb = MemoryBackend()
+    def __init__(self, debug=False, log_path=None, on_log_ready=None, settings=None, mb=None, frame=None):
+        self.mb = mb  # the shared backend (get_backend() in start() if none is given)
+        self.frame = frame  # a screen frame for the bot's watch() (it reads events, trades and chat off the screen)
         self.debug = debug
         self.catches = 0
         self.log = open(log_path, "a", buffering=1) if log_path else None
@@ -92,7 +94,8 @@ class MemFisher:
 
     # ---- lifecycle -------------------------------------------------------
     def start(self):
-        self.mb.start()
+        if self.mb is None:
+            self.mb = get_backend()
         self.hwnd = _find_roblox_hwnd()
         if self.hwnd:
             print(f"[+] Roblox window found: 0x{self.hwnd:x}")
@@ -103,8 +106,7 @@ class MemFisher:
         self._key("e", False)
         if self.inp:
             self.inp.release_all()
-        self.mb.close()
-        if self.log:
+        if self.log:  # (the memory backend is shared: it stays open)
             self.log.close()
 
     # ---- input -----------------------------------------------------------
@@ -140,11 +142,23 @@ class MemFisher:
     # ---- main loop -------------------------------------------------------
     def run(self, should_stop=lambda: False, on_catch=None, on_stuck=None,
             watch=None, act=None):
+        watched = 0.0
         try:
             while True:
                 if should_stop():
                     return
                 now = time.time()
+                # between reels, let the bot look at the screen (events, trades, chat, chores) and act on it
+                if watch and self.frame and self.state != "reel" and now - watched > WATCH_EVERY:
+                    watched = now
+                    if watch(self.frame(), False):
+                        self._key("e", False)
+                        if act:
+                            act()
+                        if should_stop():
+                            return
+                        self.idle_since = time.time()
+                        continue
                 state = self._fish_state()
 
                 if state == "biting":

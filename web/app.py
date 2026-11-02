@@ -136,7 +136,7 @@ def state():
         "outbid": webstate.load("outbid.json", [])[-20:],
         "mem": {  # live memory-polled data (always fresh)
             "balance": webstate.load("balance.json", {}),
-            "fishing": webstate.load("fishing.json", {}),
+            "fishing": webstate.load("mem_fishing.json", {}),
             "event": webstate.load("mem_event.json", {}),
             "outbid": webstate.load("mem_outbid.json", []),
             "trade_incoming": webstate.load("mem_trade.json", {}),

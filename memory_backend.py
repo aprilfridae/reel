@@ -19,12 +19,36 @@ Usage:
     txt = mb.read_text(btn)          # button's visible text
     mb.close()
 """
-import sys
+import json
 import os
+import sys
+import threading
+
+import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from reader import Reader
+
+# What the scan anchors on: the Players service's own name (always there), then a few usernames in case
+_ANCHORS = [b"Players", b"knotschaser", b"ivrilt", b"ka_bel", b"jelllllycat", b"PrepyDZN"]
+_SCAN_CHUNK = 4 * 1024 * 1024
+_MAX_STRUCTS = 20000  # anchor strings followed up (a common name like "Players" occurs many times)
+
+_shared = None
+_shared_lock = threading.Lock()
+
+
+def get_backend():
+    """The one started MemoryBackend the whole program shares (the bot, the fisher and the website poller):
+    finding the game in memory is the slow part, so it's done once."""
+    global _shared
+    with _shared_lock:
+        if _shared is None:
+            mb = MemoryBackend()
+            mb.start()
+            _shared = mb
+        return _shared
 
 
 class MemoryBackend:
@@ -44,8 +68,8 @@ class MemoryBackend:
     def start(self):
         """Attach to Roblox, locate DataModel + Players + local PlayerGui.
         Results are cached to disk so subsequent starts take ~0.1s."""
-        r = self.r
-        import json
+        if self._started:
+            return
 
         if os.path.exists(self.cache_path):
             try:
@@ -73,65 +97,55 @@ class MemoryBackend:
 
         self._full_scan()
 
+    def _chunks(self, regions):
+        """(address, bytes) of every readable part of Roblox's memory, a few MB at a time (nothing is kept)."""
+        for base, size in regions:
+            off = 0
+            while off < size:
+                n = min(_SCAN_CHUNK, size - off)
+                d = self.r.read(base + off, n)
+                if d:
+                    yield base + off, d
+                off += n
+
     def _full_scan(self):
-        r = self.r
+        """Find the DataModel from scratch. A Roblox name is a std::string (text inline when it's 15 characters
+        or less, its length at +0x10) that an Instance points to from +0x68. So: 1) find the strings holding an
+        anchor name, 2) one pass looking for any 8 bytes equal to one of those string addresses (numpy, a chunk
+        at a time), 3) for each, check the Instance around it: Players under DataModel. Memory stays at a few MB
+        (the old way kept a dict of every pointer in the game: gigabytes, and minutes)."""
         regions = list(self._regions())
+        structs = {}
+        for addr, d in self._chunks(regions):
+            for needle in _ANCHORS:
+                i = d.find(needle)
+                while i != -1 and len(structs) < _MAX_STRUCTS:
+                    if len(d) >= i + 0x14 and int.from_bytes(d[i + 0x10:i + 0x14], "little") == len(needle):
+                        structs[addr + i] = needle
+                    i = d.find(needle, i + 1)
+        if not structs:
+            raise RuntimeError("could not locate DataModel — is the game loaded?")
+        wanted = np.array(sorted(structs), dtype=np.uint64)
         dm = players = None
-
-        # ---- build pointer index (pointer value -> source addresses) ----
-        ptr_index = {}
-        CHUNK = 4 * 1024 * 1024
-        for base, size in regions:
-            off = 0
-            while off < size:
-                n = min(CHUNK, size - off)
-                d = r.read(base + off, n)
-                if d:
-                    chunk_addr = base + off
-                    start_i = (8 - (chunk_addr % 8)) % 8
-                    for i in range(start_i, len(d) - 7, 8):
-                        v = int.from_bytes(d[i:i + 8], "little")
-                        if self._valid(v):
-                            src = chunk_addr + i
-                            if v not in ptr_index:
-                                ptr_index[v] = []
-                            ptr_index[v].append(src)
-                off += n
-        print(f"[+] indexed {len(ptr_index)} unique pointer values")
-
-        # ---- find string structs matching any username needle ----
-        needles = [b"knotschaser", b"ivrilt", b"ka_bel", b"jelllllycat", b"PrepyDZN"]
-        string_structs = []
-        for base, size in regions:
-            off = 0
-            while off < size:
-                n = min(CHUNK, size - off)
-                d = r.read(base + off, n)
-                if d:
-                    for needle in needles:
-                        i = d.find(needle)
-                        while i != -1:
-                            s = base + off + i
-                            if r.u32(s + 0x10) == len(needle):
-                                string_structs.append(s)
-                            i = d.find(needle, i + 1)
-                off += n
-
-        # ---- trace each string -> Player -> Players -> DataModel ----
-        for s in string_structs[:30]:
-            for src in ptr_index.get(s, []):
-                inst = src - 0x68  # OFF_NAME
-                if not self._valid(r.u64(inst + 0x18)):
+        for addr, d in self._chunks(regions):
+            pad = (8 - addr % 8) % 8
+            usable = (len(d) - pad) // 8 * 8
+            if usable <= 0:
+                continue
+            words = np.frombuffer(d, dtype="<u8", count=usable // 8, offset=pad)
+            for k in np.nonzero(np.isin(words, wanted))[0]:
+                inst = addr + pad + int(k) * 8 - 0x68  # the Instance whose Name this is
+                if not self._valid(self.r.u64(inst + 0x18)):
                     continue
-                par = self._parent(inst)
-                if not par or not self._valid(r.u64(par + 0x18)):
-                    continue
-                if self._class_name(par) == "Players":
-                    gp = self._parent(par)
-                    if gp and self._class_name(gp) == "DataModel":
-                        dm, players = gp, par
-                        print(f"[+] Player 0x{inst:x} -> Players 0x{par:x} -> DataModel 0x{gp:x}")
-                        break
+                if structs[int(words[k])] == b"Players":
+                    cand, par = inst, self._parent(inst)  # the Players service itself
+                else:
+                    cand, par = self._parent(inst), None  # a Player: its parent should be Players
+                    par = cand and self._parent(cand)
+                if cand and par and self._class_name(cand) == "Players" and self._class_name(par) == "DataModel":
+                    dm, players = par, cand
+                    print(f"[+] Players 0x{cand:x} -> DataModel 0x{par:x}")
+                    break
             if dm:
                 break
 

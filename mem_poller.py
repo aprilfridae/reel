@@ -150,8 +150,8 @@ class MemoryPoller:
         """Read fishing state and update fishing.json for the website."""
         state = self.r.fish_state() if hasattr(self.r, 'fish_state') else self._read_fish_state()
         if state:
-            webstate.update("fishing.json", {}, lambda d: {
-                **d, "state": state, "at": time.strftime("%H:%M:%S")})
+            # (its own file: fishing.json holds the website's fishing settings)
+            webstate.save("mem_fishing.json", {"state": state, "at": time.strftime("%H:%M:%S")})
 
     def _read_fish_state(self):
         pg = getattr(self.r, 'player_gui', None)
@@ -253,9 +253,8 @@ class MemoryPoller:
 def attach_memory_poller(game, log=print):
     """Create and start a MemoryPoller alongside the bot's Game instance."""
     try:
-        from memory_backend import MemoryBackend
-        mb = MemoryBackend()
-        mb.start()
+        from memory_backend import get_backend
+        mb = get_backend()
         poller = MemoryPoller(mb, log=log)
         poller.start()
         return poller, mb

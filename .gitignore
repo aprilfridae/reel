@@ -24,3 +24,9 @@ tools/botpc.txt
 tools/setup-ssh.ps1
 # the Python used to build the .exe
 venv312/
+
+# memory research output (recordings, caches)
+*.npz
+reel_rec.csv
+explore_out.txt
+*_cache.json

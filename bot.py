@@ -24,7 +24,8 @@ from datetime import datetime
 import cv2
 
 import balance  # still available (for the .exe build)
-from memory_backend import MemoryBackend  # memory-based balance
+from memory_backend import get_backend  # the shared memory reader (balance, catches, fishing)
+from mem_reel import MemReel
 import chat
 import cleanup
 import gifts
@@ -52,6 +53,7 @@ from packs import Packs, close_any_menu, close_popup, teleport_to_fishing
 FULL_CHECK_EVERY = 60  # seconds; backup Packs-menu check during an event
 EVENT_DEBOUNCE = 8  # seconds a new banner reading must hold before an event start / end is believed
 PACKS_MODE_RECHECK = 120  # "open packs" mode: seconds between looks for new packs once none are left
+BALANCE_EVERY = 10  # seconds between balance reads from memory while fishing
 CFG = load_config()
 ATLANTIS_POPUP = os.path.join(HERE, "atlantis_popup.png")
 PACK_SESSION_START, PACK_SESSION_LATEST = CFG["session_start_hour"], CFG["session_end_hour"]
@@ -89,9 +91,20 @@ def main():
     if CFG["fullscreen"]:
         game.ensure_fullscreen(log)
     # (after the first reels, a one-line summary of how fishing runs on this PC goes to the console; nothing is sent anywhere)
-    fisher = MemFisher(game, args.lead, log_path=args.log_reels, on_log_ready=lambda extra: log(f"Fishing on this PC: {extra}"),
-                       settings=lambda: webstate.load("fishing.json", {}))
-    fisher.start()
+    try:
+        mb = get_backend()  # Roblox's memory, found once and shared with the fisher and the website's poller
+    except Exception as e:
+        mb = None
+        log(f"Memory reading unavailable ({type(e).__name__}: {e}): reading the screen instead")
+    if CFG["memory_fishing"] and mb:
+        fisher = MemFisher(mb=mb, frame=game.frame, log_path=args.log_reels,
+                           settings=lambda: webstate.load("fishing.json", {}))
+        fisher.start()
+    else:  # the fisher that steers the bar onto the fish; during reels it reads them from memory (mem_reel.py)
+        fisher = Fisher(game, args.lead, log_path=args.log_reels,
+                        on_log_ready=lambda extra: log(f"Fishing on this PC: {extra}"),
+                        settings=lambda: webstate.load("fishing.json", {}),
+                        mem_reel=MemReel(mb) if mb and CFG["memory_reel"] else None)
     packs = Packs(game)
     events = EventWatcher(game)
     chores = gifts.Chores(game, log=log)
@@ -172,17 +185,20 @@ def main():
         return mw["value"]
 
     def check_atlantis():
-        won_pack, _ = read_catch_popup_mem(game, mb)
-        if won_pack:
-            n = packs.open_pack("atlantis", should_stop=interrupted)
-            if n:
-                log(f"Opened Atlantis pack x{n}")
+        if mb:  # the catch popup's text, from memory: only open the Packs menu when it said Atlantis
+            won_pack, _ = read_catch_popup_mem(game, mb)
+            if not won_pack:
+                return
+        n = packs.open_pack("atlantis", should_stop=interrupted)
+        if n:
+            log(f"Opened Atlantis pack x{n}")
+            if not mb and fisher.last_popup is not None and not os.path.exists(ATLANTIS_POPUP):
+                cv2.imwrite(ATLANTIS_POPUP, fisher.last_popup)
 
     state = {"pack": None, "last_full": 0.0, "ended": None}
     talk = chat.Chat(game)
-    mb = MemoryBackend()
-    mb.start()
-    coins = None  # replaced by mb.get_balance()
+    coins = {"at": 0.0}  # the balance is read from memory, every BALANCE_EVERY seconds
+    money = balance.Balance(game)  # ...and off the market window right after a bid or buy
     web = {"checked": 0.0, "wants": False}
 
     def chores_due():
@@ -292,7 +308,7 @@ def main():
                         result=f"{msg} ({datetime.now():%H:%M})")
             log(("Done: " if ok else "Failed: ") + msg)
             if ok and r["kind"] in ("bid", "buy"):  # the money counter on the website, straight away
-                now = coins.after_spending()
+                now = money.after_spending()  # (read off the market window, which is open now)
                 if now:
                     log(f"Balance now {now}")
             if jr["joined"]:
@@ -398,13 +414,15 @@ def main():
         outbids.poll(img)
         if talk.due():
             talk.read(img)
-        # balance from memory instead of OCR
-        try:
-            bal = mb.get_balance()
-            if bal:
-                webstate.save("balance.json", {"value": bal, "at": datetime.now().strftime("%H:%M:%S")})
-        except Exception:
-            pass
+        # balance from memory instead of OCR (it walks the whole GUI: not on every frame)
+        if mb and time.time() - coins["at"] > BALANCE_EVERY:
+            coins["at"] = time.time()
+            try:
+                bal = mb.get_balance()
+                if bal:
+                    webstate.save("balance.json", {"value": bal, "at": datetime.now().strftime("%H:%M:%S")})
+            except Exception:
+                pass
         rolled_during_reel = events.read_deferred()
         events.update_banner(img)
         raw_pack = events.pack
@@ -589,7 +607,8 @@ def main():
                    or session_due() or market_work()
                    or once("packs") or once("index") or mode() != fishing_mode,
                    on_catch=check_atlantis,
-                   on_stuck=lambda: teleport_to_fishing(game))
+                   on_stuck=lambda: teleport_to_fishing(game),
+                   watch=watch, act=act)
 
     try:
         while True:
