@@ -7,6 +7,7 @@ Runs as a background thread alongside the bot. Reads:
 - Market cards enrichment (every 60s)
 - Event banner (every 10s)
 - Outbid / trade notifications (every 5s)
+- Card pictures (every 30s, card_art)
 """
 import threading
 import time
@@ -49,7 +50,7 @@ class MemoryPoller:
     """Background thread that reads game state from Roblox memory and pushes to webstate."""
 
     def __init__(self, reader, interval_balance=5, interval_fish=2, interval_event=10,
-                 interval_market=60, interval_outbid=5, log=print):
+                 interval_market=60, interval_outbid=5, interval_art=30, log=print):
         self.r = reader
         self.log = log
         self.intervals = {
@@ -58,6 +59,7 @@ class MemoryPoller:
             "event": interval_event,
             "market": interval_market,
             "outbid": interval_outbid,
+            "art": interval_art,
         }
         self.last_run = {k: 0.0 for k in self.intervals}
         self._stop = threading.Event()
@@ -188,6 +190,16 @@ class MemoryPoller:
                 webstate.update("mem_event.json", {}, lambda d: {
                     **d, "banner": txt.strip(), "at": time.strftime("%H:%M:%S")})
                 break
+
+    def _poll_art(self):
+        """Record the pictures of the cards in the game's menus (card_art), downloading new ones."""
+        import card_art
+        if not getattr(self, "_art_started", False):
+            self._art_started = True
+            card_art.fetch_missing()  # (pictures recorded before a restart but not downloaded yet)
+        n = card_art.harvest(self.r)
+        if n:
+            self.log(f"[mem-poller] {n} new card picture(s)")
 
     def _poll_market(self):
         """Enrich market data with memory-read card info."""

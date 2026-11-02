@@ -11,6 +11,7 @@ market_scan.read_listing() makes, plus "bid" / "buy" (where to click) and "box" 
 """
 import re
 
+import card_art
 import mem_gui
 
 RARITIES = {"COMMON", "UNCOMMON", "RARE", "EPIC", "LEGENDARY", "MYTHIC", "SECRET", "GLITCHED", "KAWAII", "RADIATION",
@@ -144,6 +145,9 @@ def listings():
             card["buy"] = (buy[1], buy[2]) if buy else None
             card["box"] = (box[0] - box[2] / 2, box[1] - box[3] / 2, box[0] + box[2] / 2, box[1] + box[3] / 2) if box else None
             card["cx"] = box[0] if box else bid[1]
+            img = card_art._artwork(mb, entry)  # the card's own picture (the website shows it)
+            card["art"] = card_art.image_id(mb, img) if img else None
+            card_art.record(card.get("name"), card.get("rarity"), card["art"])
             out.append(card)
         return out
     except Exception:

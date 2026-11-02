@@ -14,6 +14,7 @@ import uuid
 from flask import Flask, jsonify, request, send_from_directory
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import card_art  # noqa: E402
 import config  # noqa: E402
 import tz  # noqa: E402
 import webstate  # noqa: E402
@@ -115,6 +116,9 @@ def state():
         trade.update(open=None, offer=None, stale=True)
     market["cards"] = [c for c in market.get("cards", [])  # drop auctions that have ended
                        if not c.get("ends_ts") or c["ends_ts"] > now]
+    card_art.attach(market)  # the cards' own pictures (from the game), where known
+    mybids = card_art.attach(webstate.load("mybids.json", {}))
+    card_art.attach(trade)
     return jsonify({
         "market": market,
         "ones": [{k: v for k, v in e.items() if k != "fp"}  # all-time #1 cards (fp is internal)
@@ -127,7 +131,7 @@ def state():
         "rebirth": webstate.load("rebirth.json", {}),
         "mode": webstate.load("mode.json", {}),
         "bids": active_bids(market, webstate.load("requests.json", []), now),
-        "mybids": webstate.load("mybids.json", {}),
+        "mybids": mybids,
         "lookup": webstate.load("lookup.json", {}),
         "bid_anyway": bid_anyway(),
         "bids_seen": webstate.load("bids_seen.json", {}),
