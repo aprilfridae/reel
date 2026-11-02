@@ -4,18 +4,18 @@ Teleport to Spawn, then replay the author's recorded key presses exactly (ROUTE)
 press E at the "Open Market" prompt. The camera is never moved anywhere in the bot,
 so W/A/S/D always point the same way and the recorded walk works as recorded.
 
-Safety: E is only ever pressed when "Open Market" has been read on screen. Spawn
-has other E prompts nearby (e.g. a Creator Card pedestal that sells a Robux pack),
-so pressing E blindly is never OK here.
+Safety: E is only ever pressed when the one prompt in range is "Open Market". Spawn
+has other E prompts nearby (the Potion Shop, a Creator Card pedestal that sells a Robux
+pack...), so pressing E blindly is never OK here.
+
+The game draws its prompts itself: each prompt in range gets a BillboardGui "Prompt" in
+PlayerGui > CustomPrompts (gone again out of range), its button holding the action
+("Open Market") and the object ("Card Market").
 """
 import time
 
-import cv2
-
 import chat
 import mem_gui
-from game import HERE
-from ocr import read_words
 from packs import close_any_menu, close_popup, teleport
 
 # The author's recording (recordings/20261030-221958), from Spawn with the default camera:
@@ -27,25 +27,29 @@ ROUTE = [("aw", 2.356, 0), ("w", 0.200, 0), ("a", 1.532, 0),
 LEG_PAUSE = 0.08  # seconds between legs (the recording had 0.5-2.2s of idle between them)
 
 
-_game = None
+def prompts():
+    """[(action, object)] of the prompts in range, e.g. [("Open Market", "Card Market")]."""
+    g = mem_gui.gui()
+    folder = g and g.mb._find_child(g.mb.player_gui, name="CustomPrompts")
+    if not folder:
+        return []
+    mb, out = g.mb, []
+    for bb in mb._children(folder):
+        btn = mb._find_child(bb, cls="TextButton")
+        texts = [t.strip() for c in (mb._children(btn) if btn else []) if (t := mb._content_text(c)) and t.strip()]
+        out.append((texts[0] if texts else "", texts[1] if len(texts) > 1 else ""))
+    return out
 
 
-def prompt_position(img, game=None):
-    """Where the "[E] Open Market" prompt is, or None. Only this prompt may get an E.
-    Matched by picture (scores ~1.0 on the prompt, under 0.55 on anything else)."""
-    g = game or _game
-    hit = g.find("open_market_prompt", img, 0.85) if g else None
-    return (hit[0], hit[1]) if hit else None
+def prompt_position(img=None, game=None):
+    """True-ish when the "[E] Open Market" prompt is the one prompt in range (only it may get an E), else None."""
+    p = prompts()
+    return (0, 0) if len(p) == 1 and p[0][0].lower() == "open market" else None
 
 
-def market_open(img):
-    """True if the Card Market window is showing (memory's yes is trusted; a no is checked on screen)."""
-    if mem_gui.showing("MarketUI", text="Card Market"):
-        return True
-    h, w = img.shape[:2]
-    text = " ".join(t for t, _, _ in read_words(img[int(h * 0.1):int(h * 0.45), int(w * 0.15):int(w * 0.85)],
-                                                scale=2)).lower()
-    return "browse" in text and ("listings" in text or "market" in text)
+def market_open(img=None):
+    """True if the Card Market window is showing."""
+    return bool(mem_gui.showing("MarketUI", text="Card Market"))
 
 
 def walk_route(game, until_prompt=True):
@@ -55,7 +59,8 @@ def walk_route(game, until_prompt=True):
     legs were the author's, not the game's, so they're cut to a short beat.
     True if it stopped because the prompt appeared."""
     def seen():
-        return until_prompt and prompt_position(game.frame(), game) is not None
+        game.alive()
+        return until_prompt and prompt_position() is not None
 
     for keys, held, pause in ROUTE:
         for k in keys:
@@ -81,11 +86,11 @@ def _try_prompt(game):
     # The prompt is flaky (it sometimes ignores E, especially with players nearby),
     # so keep pressing for a while as long as it's on screen
     for _ in range(8):
-        if prompt_position(game.frame(), game):
+        if prompt_position():
             game.tap("e", hold=0.15)
             for _ in range(4):
                 game.wait(0.5)
-                if market_open(game.frame()):
+                if market_open():
                     return True
         else:
             game.wait(0.5)
@@ -96,22 +101,13 @@ def clear_search(game, log=print):
     """The artist box beside the sort button is shared by Browse and Who owns?, and keeps what was typed (a
     Who owns? look-up leaves the artist's name in it): Browse then shows "No cards match your search" and a scan
     reads nothing. Empty it. True if there was something in it."""
-    from ocr import read_text
     from ui_keys import clear_field
-    img = game.frame()
-    s = game.ui_scale(img)
-    h, w = img.shape[:2]
-    mem = _search_box_mem(h)  # (what's in it, x, y), read from memory
-    if mem is not None:
-        text, cx, cy = mem
-        if not text.strip():
-            return False
-    else:
-        cx, cy = w / 2 + 323 * s, h / 2 - 294 * s
-        box = img[int(cy - 16 * s):int(cy + 16 * s), int(cx - 95 * s):int(cx + 95 * s)]
-        text = " ".join(read_text(box, scale=3).split()) if box.size else ""
-        if not text or text.lower().startswith("search"):
-            return False
+    mem = _search_box_mem(game.size()[1])  # (what's in it, x, y)
+    if mem is None:
+        return False
+    text, cx, cy = mem
+    if not text.strip():
+        return False
     log(f"Market: clearing the search box ('{text}')")
     game.click(cx, cy)
     game.wait(0.3)
@@ -145,40 +141,25 @@ def ensure_browse_tab(game):
     scanning and bidding need Browse, so click it. The chat window, if it's up, covers the
     Browse tab and the first column of cards, so it's closed first."""
     chat.hide_window(game)
-    for _ in range(4):  # from memory: the Browse tab's chips show ("Rarities 93", "Ultra 1"), and the tab is found by its name
-        if mem_gui.locate(text="Rarities", screen="MarketUI", exact=False) and \
-                mem_gui.locate(text="Ultra", screen="MarketUI", exact=False):
+    for _ in range(6):
+        if on_browse():
             clear_search(game)
             return True
         tab = mem_gui.locate(text="Browse", screen="MarketUI", contains=True)
         if not tab:
-            break
+            game.wait(0.6)
+            continue
         chat.hide_window(game)  # (the open chat window lies over the tab)
         game.click(tab[0], tab[1])
         game.park_mouse()
         game.wait(1.2)
-    for _ in range(4):
-        img = game.frame()
-        words = read_words(img, scale=2)
-        if _on_browse(words, img):
-            clear_search(game)
-            return True
-        h, w = img.shape[:2]
-        s = game.ui_scale(img)
-        # Normally found by reading its name, but chat text drawn over the tab can hide it,
-        # so fall back to where the tab always is (the market window is centred)
-        spot = next(((x, y) for t, x, y in words if t.lower().startswith("brow") and y < h * 0.3),
-                    (w / 2 - 539 * s, h / 2 - 294 * s))
-        game.click(*spot)
-        game.park_mouse()
-        game.wait(1.2)
-    return _on_browse(read_words(game.frame(), scale=2), game.frame())
+    return on_browse()
 
 
-def _on_browse(words, img):
-    """The Browse tab is showing when its filter chips (All / Rarities / Event / Ultra) are."""
-    names = {t.lower() for t, x, y in words if y < img.shape[0] * 0.35}
-    return "rarities" in names and "ultra" in names
+def on_browse():
+    """The Browse tab is showing when its filter chips ("Rarities 93", "Ultra 1") are."""
+    return bool(mem_gui.locate(text="Rarities", screen="MarketUI", exact=False)
+                and mem_gui.locate(text="Ultra", screen="MarketUI", exact=False))
 
 
 def go_to_market(game, log=print, attempts=3):
@@ -192,7 +173,8 @@ def go_to_market(game, log=print, attempts=3):
         if _try_prompt(game):
             ensure_browse_tab(game)
             return True
-        cv2.imwrite(f"{HERE}/market_fail_{attempt}.png", game.frame())
-        log(f"Market attempt {attempt} didn't work; " + ("trying again" if attempt < attempts else "giving up"))
+        near = ", ".join(a for a, _ in prompts()) or "none"
+        log(f"Market attempt {attempt} didn't work (prompts in range: {near}); "
+            + ("trying again" if attempt < attempts else "giving up"))
     log("Couldn't get the Card Market open.")
     return False

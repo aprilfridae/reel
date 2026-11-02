@@ -36,6 +36,10 @@ _ANCHORS = [b"Players", b"knotschaser", b"ivrilt", b"ka_bel", b"jelllllycat", b"
 _SCAN_CHUNK = 4 * 1024 * 1024
 _MAX_STRUCTS = 20000  # anchor strings followed up (a common name like "Players" occurs many times)
 
+_TEXT_CLASSES = ("TextLabel", "TextButton", "TextBox")
+# where each keeps its displayed text (see _content_text); a TextBox's is what's typed in it
+_SHOWN_TEXT = {"TextLabel": 0xE08, "TextButton": 0xE20, "TextBox": 0xE00}
+
 _shared = None
 _shared_lock = threading.Lock()
 
@@ -182,6 +186,42 @@ class MemoryBackend:
     def close(self):
         self.r.close()
 
+    def alive(self):
+        """Is the game we found still there (the same Roblox, the same DataModel)? A reconnect builds a new one."""
+        try:
+            return (self.r.pid == Reader._find_pid("RobloxPlayerBeta.exe")
+                    and self._class_name(self.player_gui) == "PlayerGui"
+                    and self._parent(self._parent(self.player_gui)) == self.players)
+        except Exception:
+            return False
+
+    def reattach(self, tries=20, wait=10, force=False):
+        """Find the game again, in place (everyone shares this object): after Roblox was restarted or reconnected
+        (force: a reconnect's new DataModel, while the old one's memory can still read as valid for a while).
+        True once found."""
+        for k in range(tries):
+            try:
+                if self.alive() and not (force and k == 0):
+                    return True
+                if force and k == 0 and os.path.exists(self.cache_path):
+                    os.remove(self.cache_path)  # (it holds the old addresses)
+                if self.r.pid != Reader._find_pid("RobloxPlayerBeta.exe"):
+                    try:
+                        self.r.close()
+                    except Exception:
+                        pass
+                    self.r = Reader()
+                self._started = False
+                self._cls_cache = {}
+                self.generation = getattr(self, "generation", 0) + 1
+                self.start()
+                return True
+            except Exception as e:
+                print(f"[mem] game not found yet ({type(e).__name__}: {e})")
+                if k < tries - 1:
+                    time.sleep(wait)
+        return False
+
     # ---- low level -------------------------------------------------------
     def _valid(self, v):
         return v and 0x10000 < v < 0x7FFFFFFFFFFF
@@ -289,7 +329,13 @@ class MemoryBackend:
 
     def _content_text(self, inst):
         ptr = self.r.u64(inst + 0xC60)
-        return self.r.read_str(ptr) if self._valid(ptr) else None
+        t = self.r.read_str(ptr) if self._valid(ptr) else None
+        if t is None:
+            # some labels (a countdown the game rewrites every second, Roblox's own chat, the market's rarity buttons)
+            # leave that one empty: their displayed text (rich-text tags stripped) is also kept in the object itself
+            off = _SHOWN_TEXT.get(self._class_name(inst))
+            t = self.r.read_str(inst + off) if off else None
+        return t
 
     def _resolve_abs_pos(self, test_inst):
         for off in (0xFC, 0x110, 0xE4):

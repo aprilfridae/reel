@@ -2,14 +2,7 @@
 numpy==1.26.4
 opencv-python==4.9.0.80
 flask
-dxcam
 comtypes
+psutil
 tzdata
-winrt-runtime
-winrt-Windows.Foundation
-winrt-Windows.Foundation.Collections
-winrt-Windows.Globalization
-winrt-Windows.Graphics.Imaging
-winrt-Windows.Media.Ocr
-winrt-Windows.Storage.Streams
 pyinstaller

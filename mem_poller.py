@@ -53,7 +53,7 @@ class MemoryPoller:
     """Background thread that reads game state from Roblox memory and pushes to webstate."""
 
     def __init__(self, reader, interval_balance=5, interval_fish=2, interval_event=10,
-                 interval_market=60, interval_outbid=5, interval_art=30, log=print):
+                 interval_market=60, interval_outbid=2, interval_art=30, log=print):
         self.r = reader
         self.log = log
         self.intervals = {
@@ -229,27 +229,17 @@ class MemoryPoller:
         """Check for the 'YOU WERE OUTBID!' notice in PlayerGui. Saved once when it shows up, not again while it
         stays up. The game keeps its menus in memory when they close, and other text says "outbid" too (the bid
         window's "coins are held until you're outbid"), so only the notice's title counts, and only while showing."""
-        import mem_gui
-        pg = getattr(self.r, 'player_gui', None)
-        g = mem_gui.gui()
-        if not pg or g is None:
-            return  # (can't tell what's showing: the screen watcher covers it)
-        if not getattr(self, "_outbid_pruned", False):
-            self._outbid_pruned = True  # entries saved by the old match (anything with "outbid" in it, shown or not)
-            webstate.update("mem_outbid.json", [], lambda lst: [e for e in lst if NOTICE.search(e.get("text", ""))])
-        title = next((i for d, i in self._walk(pg, depth=16)
-                      if NOTICE.search(self.r._content_text(i) or "") and g.is_shown(i)), None)
-        if title is None:
+        import outbid
+        if not getattr(self.r, 'player_gui', None):
+            return
+        notice = outbid.read_notice(self.r, self._walk)
+        if notice is None:
             self._outbid_up = None
             return
-        parent = self.r._parent(title)
-        parts = [(self.r._content_text(c) or "").strip() for c in (self.r._children(parent) if parent else [])]
-        text = " / ".join(p for p in parts if p and not NOTICE.search(p)) or self.r._content_text(title).strip()
-        if getattr(self, "_outbid_up", None) == text:
+        if getattr(self, "_outbid_up", None) == notice["text"]:
             return  # the same notice, still up
-        self._outbid_up = text
-        entry = {"at": time.strftime("%H:%M:%S"), "text": text, "ts": time.time()}
-        webstate.update("mem_outbid.json", [], lambda lst: (lst + [entry])[-50:])
+        self._outbid_up = notice["text"]
+        outbid.save(notice)
 
     def _poll_trade(self):
         """Check for incoming trade requests."""

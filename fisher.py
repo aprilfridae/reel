@@ -1,6 +1,7 @@
-"""Fishing for Underground Artist RNG.
+"""Fishing for Underground Artist RNG, read from the game's memory: whether a cast is out (the fishing panel's Visible
+flag), the reel's bar and fish (mem_reel.py) and the catch popup (mem_catch_popup.py). The screen is never grabbed.
 
-Fish only:  python fisher.py   (stand at a fishing spot first; F8 stops)
+Fish only:  python fisher.py   (it goes to the fishing spot; F8 stops)
 The full schedule (fishing + packs + event) is in bot.py.
 """
 import argparse
@@ -8,11 +9,8 @@ import json
 import os
 import time
 
-import cv2
-
 from game import HERE, Game, StopBot
 from packs import close_popup, dismiss_popup, read_catch_popup
-from vision import PANEL_FROM_BOTTOM, PANEL_HALF_WIDTH, STRIP_HALF, STRIP_ROWS, detect
 
 # Bar physics fitted from live reels on a test PC at 50 fps (px/s^2 at UI scale 1)
 A_HOLD = 1015
@@ -20,7 +18,8 @@ A_RELEASE = 737
 DEFAULT_LEAD = 0.4  # best in replays of real reels (from offline replays of recorded reels)
 CAST_DELAY = 0.3  # seconds the fishing panel must be gone before the first cast press
 RECAST_EVERY = 0.4  # then E is pressed this often until a cast starts (the panel takes ~0.3s to show)
-SLOW_FULL_EVERY = 0.5  # seconds between whole-window frames while fishing without the GPU stream
+WATCH_EVERY = 0.25  # seconds between the bot's looks at the game (events, trades, chat) while not reeling
+WATCH_REELING = 0.5  # ...and during a reel (only quick ones then)
 LOG_FIRST_REELS = 10 # reels of each run written to reel_log.csv
 FAST_LOOK = 0.02 # seconds between looks (50 a second) the bar controller was tuned at
 SLOW_LEAD = 1.5  # extra lead per second of look time beyond that
@@ -133,10 +132,11 @@ class Fisher:
     def __init__(self, game, lead=DEFAULT_LEAD, debug=False, log_path=None, on_log_ready=None, settings=None,
                  mem_reel=None):
         self.game = game
-        # mem_reel.MemReel: during a reel the bar and the fish come from memory (no screen grab at all);
-        # the screen is still used between reels (casting, the waiting panel, the catch popup)
-        self.mem_reel = mem_reel
-        self.screen_w = None  # (the window's width, for turning memory's screen x into panel x)
+        if mem_reel is None:
+            from memory_backend import get_backend
+            from mem_reel import MemReel
+            mem_reel = MemReel(get_backend())
+        self.mem_reel = mem_reel  # mem_reel.MemReel: the fishing panel, the bar and the fish, from memory
         self.reeler = Reeler(lead)
         self.debug = debug
         self.catches = 0  # reels finished
@@ -153,9 +153,7 @@ class Fisher:
         self.on_log_ready = on_log_ready  # called once, with a summary line, after LOG_FIRST_REELS reels
         self.looks = []
         self.first_reel_t = None
-        self.grab_ms = 0.0  # smoothed time to get one frame
-        self.grab_full_ms = 0.0  # ...and one whole frame
-        self.detect_ms = 0.0  # ...and to read the bar and fish off it
+        self.detect_ms = 0.0  # smoothed time to read the panel, the bar and the fish from memory
         if self.csv is None:
             path = os.path.join(HERE, "reel_log.csv")
             try:
@@ -168,7 +166,6 @@ class Fisher:
             except OSError:
                 self.csv = None
         self.reel_id = 0
-        self.sample_saved = False
         # The bar answers E after a delay that differs by PC (50 ms on one, 175 ms on another): it's fitted from the
         # first reels and sets how far ahead to aim (a saved value is used until then)
         self.auto_lead = lead == DEFAULT_LEAD
@@ -242,70 +239,36 @@ class Fisher:
         """Fish until should_stop() is true (checked between reels).
         on_catch() runs after a catch that won a pack (popup already closed);
         on_stuck() runs when casting keeps failing.
-        watch(img, reeling) is called on every frame; once it returns True, act()
-        runs as soon as no reel is in progress, then fishing carries on. While
-        reeling, watch should do only quick work so the reel isn't slowed down."""
-        game = self.game
+        watch(None, reeling) is called a few times a second (the bot reads the game from memory: no frame is passed);
+        once it returns True, act() runs as soon as no reel is in progress, then fishing carries on. While reeling,
+        watch should do only quick work so the reel isn't slowed down."""
+        game, reel = self.game, self.mem_reel
         state = "idle"
         idle_since = time.time()
         last_cast = 0.0
         last_stuck = 0.0
-        saved_stuck = False
         last_zone = 0.0
+        watched = 0.0
         pending = False
         pending_since = 0.0
         reel_t0, reel_frames = time.time(), 0
-        scale, last_full = None, 0.0
+        scale = reel.scale() or 1.0
         try:
             while True:
+                game.alive()  # (F8 / stop.flag, and the window closing)
                 now = time.time()
-                # From memory, while a reel is on: the bar and the fish without grabbing the screen
-                mem = self.mem_reel.read() if self.mem_reel is not None and scale is not None else None
-                if mem is not None:
-                    t_det = time.time()
-                    x0 = self.screen_w / 2 - PANEL_HALF_WIDTH * scale  # panel x, as detect() gives it
-                    d = {"busy": True, "scale": scale, "fish": mem["fish"] - x0,
-                         "zone": (mem["zone"][0] - x0, mem["zone"][1] - x0)}
-                    img = None
-                    self.detect_ms = 0.95 * self.detect_ms + 0.05 * (time.time() - t_det) * 1000
-                    self.grab_ms = 0.95 * self.grab_ms
-                else:
-                    d = None
-                # Without the GPU stream a whole frame takes ~100 ms; the strip around the panel is all the
-                # reel needs, and several times quicker. A whole frame is still taken now and then
-                # (for watch: events, chat, coins) while not reeling.
-                # (the longer a whole frame takes, the less often one is taken)
-                full_every = max(SLOW_FULL_EVERY, self.grab_full_ms / 1000 * 20)
-                panel_only = (game.panel_capture and scale is not None
-                              and (state == "reel" or now - last_full < full_every))
-                half = PANEL_HALF_WIDTH
-                if d is not None:
-                    pass  # read from memory above
-                elif panel_only:
-                    rows, half = STRIP_ROWS, STRIP_HALF  # just the Stop button, the track and the blue button
-                    t_grab = time.time()
-                    img = game.panel_frame(rows, half, scale)
-                else:
-                    rows = PANEL_FROM_BOTTOM
-                    t_grab = time.time()
-                    img = game.frame()
-                    last_full = time.time()
-                    self.grab_full_ms = 0.9 * self.grab_full_ms + 0.1 * (last_full - t_grab) * 1000
-                    scale = game.ui_scale(img)
-                    self.screen_w = img.shape[1]
-                    if watch and not pending and watch(img, state == "reel"):
+                t_det = time.time()
+                mem = reel.read()
+                busy = mem is not None or reel.panel_shown()
+                self.detect_ms = 0.95 * self.detect_ms + 0.05 * (time.time() - t_det) * 1000
+                if watch and not pending and now - watched > (WATCH_REELING if state == "reel" else WATCH_EVERY):
+                    watched = now
+                    if watch(None, state == "reel"):
                         pending = True
                         pending_since = now
-                if d is None:
-                    self.grab_ms = 0.95 * self.grab_ms + 0.05 * (time.time() - t_grab) * 1000
-                    t_det = time.time()
-                    d = detect(img, scale if scale is not None else game.ui_scale(img), rows, reeling=state == "reel", half=half)
-                    self.detect_ms = 0.95 * self.detect_ms + 0.05 * (time.time() - t_det) * 1000
-                    if self.mem_reel is not None and scale is not None:
-                        d["zone"] = None  # memory says no reel is on: a green streak on screen isn't one
                 # act() opens menus: not while a fish is on the line or being reeled (that catch is
                 # finished and its popup closed first), but don't wait more than PENDING_WAIT for it
-                if pending and not d["zone"] and state != "reel" and (not d["busy"] or now - pending_since > PENDING_WAIT):
+                if pending and mem is None and state != "reel" and (not busy or now - pending_since > PENDING_WAIT):
                     game.key("e", False)
                     close_popup(game)
                     act()
@@ -314,61 +277,46 @@ class Fisher:
                     idle_since = time.time()
                     continue
 
-                if d["zone"]:
+                if mem is not None:
                     last_zone = now
                     if state != "reel":
                         state = "reel"
-                        saved_stuck = False
                         self.reeler.reset()
                         self.apply_settings()  # (the website's setting may have changed since the last reel)
+                        scale = reel.scale() or scale
                         reel_t0, reel_frames = now, 0
                     reel_frames += 1
-                    if not self.sample_saved and now - reel_t0 > 1.5 and img is not None:
-                        # one picture of a reel in progress, to check the vision against on a new PC
-                        self.sample_saved = True
-                        cv2.imwrite(os.path.join(HERE, "reel_sample.jpg"), img, [cv2.IMWRITE_JPEG_QUALITY, 85])
+                    d = {"busy": True, "scale": scale, "fish": mem["fish"], "zone": mem["zone"]}
                     hold = self.reeler.step(d, now)
                     game.key("e", hold)
                     self.cal_frames.append((now, (d["zone"][0] + d["zone"][1]) / 2, float(hold)))
-                    if self.log and img is not None and self.reel_id < 6 and int(now * 4) % 4 == 0 and \
-                            now - getattr(self, "_last_shot", 0) > 0.9:
-                        # a few screenshots mid-reel, to check the vision against
-                        self._last_shot = now
-                        cv2.imwrite(os.path.join(HERE, f"reel_{self.reel_id}_{int(now * 10) % 100000}.png"), img)
                     if self.csv and (self.log or self.reel_id < LOG_FIRST_REELS):
-                        fish = "" if d["fish"] is None else f"{d['fish']:.1f}"
-                        self.csv.write(f"{self.reel_id},{now:.3f},{d['zone'][0]},{d['zone'][1]},"
-                                       f"{fish},{int(hold)},\n")
+                        self.csv.write(f"{self.reel_id},{now:.3f},{d['zone'][0]:.1f},{d['zone'][1]:.1f},"
+                                       f"{d['fish']:.1f},{int(hold)},\n")
                     if self.debug:
                         print(f"zone={d['zone']} fish={d['fish']} v={self.reeler.v:6.0f} hold={hold}")
-                    if d["fish"] is None and not saved_stuck and img is not None:
-                        # Save what the bot saw so we can teach it this fish
-                        name = f"stuck_{int(time.time())}.jpg"
-                        cv2.imwrite(os.path.join(HERE, name), img)
-                        print(f"Couldn't find the fish; saved {name}")
-                        saved_stuck = True
                     time.sleep(0.005)
                     continue
 
-                if state == "reel" and d["busy"] and now - last_zone < 1.0:
-                    # Panel still up: just a frame where the bar wasn't read
+                if state == "reel" and busy and now - last_zone < 1.0:
+                    # Panel still up: the bar and the fish just stood still for a moment
                     time.sleep(0.005)
                     continue
                 if state == "reel":
                     game.key("e", False)
                     self.catches += 1
-                    won_pack, self.last_popup = read_catch_popup(game)
+                    won_pack, title = read_catch_popup(game)
+                    self.last_popup = title
                     if self.csv and (self.log or self.reel_id < LOG_FIRST_REELS):
                         # A popup means the fish was caught; none means it got away
-                        self.csv.write(f"{self.reel_id},{time.time():.3f},,,,,"
-                                       f"{int(self.last_popup is not None)}\n")
+                        self.csv.write(f"{self.reel_id},{time.time():.3f},,,,,{int(title is not None)}\n")
                     self.reel_id += 1
                     self._calibrate()
                     if self.csv:
                         self.csv.flush()
                     secs = max(time.time() - reel_t0, 0.1)
                     self.looks.append(reel_frames / secs)
-                    self.landed += self.last_popup is not None  # a catch shows its popup; a fish that got away doesn't
+                    self.landed += title is not None  # a catch shows its popup; a fish that got away doesn't
                     print(f"Reel finished ({self.catches} so far, caught {self.landed}, {reel_frames / secs:.0f} looks/s)"
                           + (", got an Atlantis pack!" if won_pack else ""))
                     if self.first_reel_t is None:
@@ -378,12 +326,8 @@ class Fisher:
                             self.reel_id >= LOG_FIRST_REELS
                             or (self.reel_id >= 3 and time.time() - self.first_reel_t > 240)):
                         mid = sorted(self.looks)[len(self.looks) // 2]
-                        self.on_log_ready(f"window {img.shape[1]}x{img.shape[0]}, ui scale {game.ui_scale(img):.2f}, "
-                                          f"capture {game.cap.mode}{' + strip' if game.strips or game.slow_capture else ''}"
-                                          f"{', reel read from memory' if self.mem_reel is not None else ''}, "
-                                          f"median {mid:.0f} looks/s, "
-                                          f"frame grab {self.grab_ms:.0f} ms (whole frame {self.grab_full_ms:.0f} ms), "
-                                          f"detect {self.detect_ms:.0f} ms, "
+                        self.on_log_ready(f"ui scale {scale:.2f}, reel read from memory, median {mid:.0f} looks/s, "
+                                          f"read {self.detect_ms:.1f} ms, "
                                           f"bar lag {'?' if self.lag is None else f'{self.lag * 1000:.0f} ms'}, "
                                           f"{self.reeler.lead:.2f}s lead")
                         self.on_log_ready = None
@@ -399,7 +343,7 @@ class Fisher:
 
                 if should_stop():
                     return
-                if d["busy"]:
+                if busy:
                     state = "wait"
                 else:
                     if state != "idle":
@@ -417,7 +361,7 @@ class Fisher:
                                 on_stuck()
                         game.tap("e")
                         last_cast = time.time()
-                time.sleep(0.005)
+                time.sleep(0.005 if state != "wait" else 0.02)
         finally:
             game.key("e", False)
 
@@ -428,8 +372,15 @@ def main():
     ap.add_argument("--debug", action="store_true", help="print what the bot sees every frame")
     args = ap.parse_args()
 
+    from memory_backend import get_backend
+    from mem_reel import MemReel
+    from packs import close_any_menu, close_popup, teleport_to_fishing
+
     game = Game()
-    fisher = Fisher(game, args.lead, args.debug)
+    fisher = Fisher(game, args.lead, args.debug, mem_reel=MemReel(get_backend()))
+    close_popup(game)
+    close_any_menu(game)
+    teleport_to_fishing(game)
     print("Fishing. Press F8 to stop.")
     try:
         fisher.run()

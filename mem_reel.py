@@ -22,6 +22,7 @@ import struct
 import time
 
 PANEL_TALL = 150  # px: taller than this = the reel panel (190), not the waiting one (56)
+TRACK_W = 428  # px: the track's width at UI scale 1
 GEOM = 0xDC  # centre x, centre y, then (after 16 bytes) top-left x, y and size w, h
 GEOM_LEN = 0x28
 STILL_ENDS = 0.4  # seconds of neither the bar nor the fish moving = the reel is over
@@ -70,6 +71,19 @@ class MemReel:
         cx, cy = struct.unpack_from("<2f", b, 0)
         x, y, w, h = struct.unpack_from("<4f", b, 0x18)
         return cx, cy, x, y, w, h
+
+    def panel_shown(self):
+        """Is the fishing panel up (waiting for a bite, or a reel)? Its Visible flag (see mem_gui)."""
+        import mem_gui
+        if self.panel is None and not self._find():
+            return False
+        g = mem_gui.gui()
+        return bool(g and g.is_shown(self.panel))
+
+    def scale(self):
+        """How big the game draws its UI here: the track is 428 px wide at scale 1."""
+        t = self._geom(self.track) if self.track else None
+        return t[4] / TRACK_W if t and 50 < t[4] < 2000 else None
 
     def read(self):
         """None if no reel is on (or the panel can't be read), else {"zone": (left, right), "fish": x} in screen

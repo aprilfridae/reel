@@ -32,10 +32,6 @@ DEFAULTS = {
     "rebirth_forfeits_bids": True,  # coins in active Market bids are lost on a rebirth: go ahead anyway (false = cancel)
     "claim_gifts": True,         # playtime gifts + the daily spin
     "memory_polling": True,      # read game state from memory (balance, fishing, event, outbid, trade) for the website
-    # fish with mem_fisher.py (memory) instead of the screen fisher. Off: it only reads the panel's text, so it
-    # can't cast (the panel only shows after a cast) or steer the bar onto the fish (it holds E for the whole reel)
-    "memory_fishing": False,
-    "memory_reel": True,         # the screen fisher reads the bar and the fish from memory during reels (no capture)
 }
 
 

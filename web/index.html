@@ -210,7 +210,7 @@
   .outbid { pointer-events: auto; display: grid; grid-template-columns: auto 1fr auto; gap: 12px; align-items: center;
     padding: 10px 12px; background: #050505; border: 2px solid #ef4444; border-radius: 12px;
     box-shadow: 0 0 24px rgba(239, 68, 68, .35); animation: ob-in .3s var(--ease); }
-  .outbid img { width: 44px; height: 60px; object-fit: cover; object-position: 2% center; border-radius: 6px; cursor: zoom-in; }
+  .outbid .obc .rc.mini { width: 52px; height: 52px; }
   .outbid b { display: block; color: #ef4444; font: 800 15px/1.2 var(--f-body); }
   .outbid .ob-line { font-size: 13px; overflow-wrap: anywhere; }
   .outbid .ob-at { color: var(--dim); font: 500 11px/1.4 var(--f-mono); }
@@ -247,7 +247,9 @@
   .onecard { background: var(--panel); border: var(--hair); border-radius: var(--r); overflow: hidden; min-width: 0;
          transition: border-color var(--t) var(--ease); }
   .onecard:hover { border-color: var(--dim); }
-  .onecard img { display: block; width: 100%; aspect-ratio: 4 / 5; object-fit: cover; background: var(--bg); border-bottom: var(--hair); }
+  .onecard .rcw { display: flex; justify-content: center; padding: 12px 12px 0; }
+  .onecard .rcw .rc { width: 100%; }
+  .onecard > img { display: block; width: 100%; aspect-ratio: 4 / 5; object-fit: cover; background: var(--bg); border-bottom: var(--hair); }
   .onecard .ometa { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 10px 12px; font-size: 12px; color: var(--dim); }
   .empty { padding: var(--u) 0; text-align: center; color: var(--dim); }
   .scrim { display: none; }
@@ -284,7 +286,8 @@
   .prow.hit { background: color-mix(in srgb, var(--fg) 8%, transparent); }
   .prow.hit .k { border-color: var(--fg); }
   .prow .ones { font-weight: 700; }
-  .prow .pshot { width: 96px; height: 54px; object-fit: cover; border: var(--hair); border-radius: 4px; }
+  .prow .pcards { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; max-width: 300px; }
+  .prow .pcards .rc.mini { width: 40px; height: 40px; flex: none; }
   .lightbox figure:has(img[src*="/packs/"]) { max-width: min(96vw, 1100px); }
   .proll { display: flex; flex-wrap: wrap; gap: 6px 10px; color: var(--dim); font: 500 11px/1.4 var(--f-mono); }
   /* trade */
@@ -363,7 +366,6 @@
   .wants .sum { color: var(--dim); font: 500 11px/1.4 var(--f-mono); }
   .wants .tc .act { opacity: 1; transform: none; }  /* the button is the point here: always show it */
   .wants .tc.wanted { border-color: var(--line); }
-  .lightbox figure:has(img[src*="trade.jpg"]) { max-width: min(96vw, 1100px); }
   @media (max-width: 820px) { .board { grid-template-columns: 1fr; } .tgrid { grid-template-columns: repeat(auto-fill, minmax(88px, 1fr)); } }
 
   /* bot controls: mode tiles behave as radio cards */
@@ -824,7 +826,8 @@ function renderOnes(s) {
   $("ones-at").textContent = sorted.length ? `latest ${(sorted[0].found_at || "").slice(0, 10)}` : "";
   setHtml($("ones-body"), `<div class="ones-sum"><span id="ones-total">${list.length}</span><span id="ones-breakdown">${
     esc(Object.entries(byRarity).map(([r, n]) => `${n} ${label(r)}`).join(" · "))}</span></div>` + (sorted.length
-    ? `<div class="ogrid">${sorted.map(o => `<div class="onecard"><img src="/static/ones/${esc(o.image)}" alt="">
+    ? `<div class="ogrid">${sorted.map(o => `<div class="onecard"><div class="rcw">${rcard({...o, name: o.name || "not read yet",
+        serial: "1", rarity: RARITIES.includes(o.rarity) ? o.rarity : "secret"}, {guest: true})}</div>
       <div class="ometa"><span class="chip ${["blood", "eclipse"].includes(o.rarity) ? esc(o.rarity) : "other"}">${esc(label(o.rarity))}</span>
       <span>found ${esc((o.found_at || "").slice(0, 10))}</span></div></div>`).join("")}</div>`
     : `<div class="empty">no #1s recorded yet. they're added after each blood moon / eclipse event.</div>`));
@@ -870,8 +873,9 @@ function renderPacks(s) {
   setHtml($("packs-roll"), kinds.map(([k, n]) => `<span>${esc(k.replace(/_/g, " "))} ${n}</span>`).join(""));
   setHtml($("packs-log"), log.length ? log.map(e => `<div class="prow"><span class="t">${esc(e.time)}</span><span class="k">${e.kind === "open" ? "opened" : "rolled"}</span>
       <span>${esc(e.pack)}${e.kind === "roll" && e.n > 1 ? ` ×${e.n}` : ""}</span>
-      ${e.shot ? `<img class="pshot zoomable" src="/static/packs/${esc(e.shot)}" data-full="/static/packs/${esc(e.shot)}"
-        data-cap="${esc(e.pack + " · " + e.time)}" alt="" title="click to enlarge" loading="lazy" onerror="this.remove()">` : "<span></span>"}</div>`).join("")
+      ${e.cards && e.cards.length ? `<span class="pcards">${e.cards.map(c => rcard(c, {mini: true, guest: true,
+        attrs: `title="${esc([c.name, c.serial ? "#" + c.serial : "", (c.rarity || "").toLowerCase()].filter(Boolean).join(" · "))}"`})).join("")}</span>`
+      : "<span></span>"}</div>`).join("")
     : `<div class="empty">nothing yet. packs the bot opens, and the rarer ones it rolls, show up here as they happen.</div>`);
 }
 
@@ -888,7 +892,6 @@ $("trade-body").innerHTML = `<div class="trade-req" id="trade-req" hidden></div>
   <div id="trade-room" hidden>
     <div class="room-head">
       <div class="who"><span class="eyebrow">trading with</span><b id="room-name"></b><span id="room-read"></span></div>
-      <button id="room-live" class="zoomable" title="the trade window in game, as of a few seconds ago">${icon("search")}<span>live view</span></button>
       <button data-tcmd="refresh" title="read both card lists again">${icon("refresh")}<span>read again</span></button>
     </div>
     <div class="board">
@@ -921,16 +924,16 @@ $("trade-body").innerHTML = `<div class="trade-req" id="trade-req" hidden></div>
 const serialKey = (c) => { const n = parseInt(c.serial, 10); return Number.isFinite(n) && String(n) === String(c.serial) ? n : c.serial === "1" ? 1 : c.serial === "2-9" ? 5 : 1e9; };
 const cardKey = (c) => `${(c.name || "").toLowerCase().replace(/[^a-z0-9]/g, "")}|${c.serial || ""}`;
 const cardLabel = (c) => `${c.name || "?"} #${c.serial || "?"}`;
-// a card as the game draws it (the bot saves each tile's picture); text when there's no picture
+// a card drawn from its artwork (read in memory); text when there's no picture yet
 function tcard(c, opts = {}) {
   const tag = opts.button ? "button" : "div";
   const data = opts.button ? ` data-${opts.button}="${esc(JSON.stringify({name: c.name, serial: c.serial, rarity: c.rarity,
-    rank: c.rank || "", img: c.img || "", query: opts.query || ""}))}"` : "";
+    rank: c.rank || "", copy: c.copy || "", query: opts.query || ""}))}"` : "";
   const cls = ["tc", c.wanted ? "wanted" : "", opts.cls || ""].filter(Boolean).join(" ");
   const meta = [c.rarity, c.grade, c.income ? `+${c.income}/s` : ""].filter(Boolean).join(" · ");
   const title = `${cardLabel(c)}${meta ? " · " + meta : ""}${c.count > 1 ? ` · ×${c.count}` : ""}`;
   return `<${tag} class="${cls}"${data} title="${esc(title)}" ${opts.disabled ? "disabled" : ""}>
-    ${rcard(c) || (c.img ? `<img src="/static/tcards/${esc(c.img)}" alt="${esc(cardLabel(c))}" loading="lazy" onerror="this.remove()">` : "")}
+    ${rcard(c)}
     <div class="tc-fb" ${artUrl(c) ? "hidden" : ""}><span class="sno ${String(c.serial) === "1" ? "n1" : ""}">#${esc(c.serial || "?")}</span><b>${esc(c.name || "?")}</b><span>${esc(meta)}</span></div>
     ${c.wanted ? `<span class="tag">${esc(opts.tag || "wanted")}</span>` : ""}${opts.act ? `<span class="act">${esc(opts.act)}</span>` : ""}</${tag}>`;
 }
@@ -1007,9 +1010,6 @@ function renderTrade(s) {
   if (!open) return;
   $("room-name").textContent = t.open;
   $("room-read").textContent = t.scanned_at ? `cards read at ${t.scanned_at}` : "reading the cards…";
-  $("room-live").dataset.full = t.snap ? `/static/trade.jpg?t=${t.snap}` : "";
-  $("room-live").dataset.cap = `the trade window in game${t.snap ? " · " + localTime(t.snap) : ""}`;
-  $("room-live").disabled = !t.snap;
   const off = t.offer || {}, busy = tBusyKeys();
   for (const [w, el] of [["mine", "give"], ["theirs", "get"]]) {
     const o = off[w] || {cards: []}, cards = o.cards || [];
@@ -1333,7 +1333,7 @@ function renderOutbid(s) {
     const line = e.by ? `${esc(e.by)} bid ${esc(e.amount)} on ${esc(e.card)} (${esc(e.rarity)}) · you bid ${esc(e.mine)}`
                       : esc(e.text || "");
     return `<div class="outbid" data-ts="${e.ts}">
-      ${e.image ? `<img class="zoomable" src="/static/outbid/${esc(e.image)}" data-full="/static/outbid/${esc(e.image)}" alt="the notice in the game">` : "<span></span>"}
+      ${e.name ? `<div class="obc">${rcard(e, {mini: true, guest: true})}</div>` : "<span></span>"}
       <div><b>⚠ you were outbid!</b><div class="ob-line">${line}</div><div class="ob-at">${esc(e.at || "")}</div></div>
       <button class="ob-x" aria-label="dismiss">×</button></div>`;
   }).join("");
@@ -1387,13 +1387,7 @@ async function refresh() {
     fishEl.textContent = fish.state || "—";
     fishEl.className = `fish-ind ${fish.state || ""}`;
   }
-  // memory-polled outbid (adds to the CV-read ones; one notice seen both ways is shown once)
-  if (mem.outbid && mem.outbid.length) {
-    const cv = s.outbid || [];
-    const extra = mem.outbid.filter(m => !cv.some(c => Math.abs((c.ts || 0) - (m.ts || 0)) < 20));
-    s.outbid = [...cv, ...extra].sort((a, b) => (a.ts || 0) - (b.ts || 0));  // oldest first, like outbid.json
-  }
-  // memory-polled trade incoming (adds to the CV-read one)
+  // memory-polled trade incoming (adds to the trade flow's one)
   if (mem.trade_incoming && mem.trade_incoming.incoming && !s.trade?.incoming) {
     s.trade = {...(s.trade || {}), incoming: mem.trade_incoming.incoming};
   }

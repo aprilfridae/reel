@@ -7,10 +7,10 @@ game. A server can be picked with "gameInstanceId=<job id>" (config.json: server
 The player has to be signed in already; this never touches a password.
 """
 import os
+import re
 import time
 
 from game import WindowLost, find_roblox
-from ocr import read_words
 
 
 def join_url(cfg):
@@ -20,10 +20,24 @@ def join_url(cfg):
     return url
 
 
-def in_game(game):
-    """True once the game's own screen is up (its Packs button is showing)."""
+def _backend(find=False):
+    """The shared memory reader, pointed at the running game (found again when Roblox was restarted, if `find`), or
+    None while the game isn't in memory yet."""
+    from memory_backend import get_backend
     try:
-        return game.find("packs_button", game.frame(), 0.7) is not None
+        mb = get_backend()
+    except Exception:
+        return None
+    if find and not mb.alive() and not mb.reattach(tries=1):
+        return None
+    return mb
+
+
+def in_game(game):
+    """True once the game's own screen is up (its Packs button is showing, in memory)."""
+    import mem_gui
+    try:
+        return _backend(find=True) is not None and mem_gui.locate(text="Packs", screen="CardsUI") is not None
     except Exception:
         return False
 
@@ -75,22 +89,33 @@ def ensure_running(cfg, log=print):
     return start_roblox(cfg, log) and wait_for_window(log=log)
 
 
-def _dialog_words(game, img=None):
-    img = game.frame() if img is None else img
-    h, w = img.shape[:2]
-    x0, y0 = int(w * 0.35), int(h * 0.33)
-    return [(t, x0 + x, y0 + y) for t, x, y in read_words(img[y0:int(h * 0.68), x0:int(w * 0.65)], scale=2)]
+_DISCONNECTED = re.compile(r"disconnected|lost connection|error code", re.I)
 
 
 def is_disconnected(game, img=None):
-    """Is Roblox's "Disconnected ... (Error Code: 277)" box up? (It appears when the internet
-    drops; the window stays open, so it isn't noticed as a lost window.) Returns the
-    (Reconnect, Leave) button positions as a dict, or None."""
-    words = _dialog_words(game, img)
-    names = {t.lower().strip(".:!") for t, _, _ in words}
-    if "disconnected" not in names:
+    """Is Roblox's "Disconnected ... (Error Code: 277)" box up? (It appears when the internet drops; the window stays
+    open, so it isn't noticed as a lost window.) Read in memory, in CoreGui's RobloxPromptGui. Returns the (Reconnect,
+    Leave) button positions as a dict, or None."""
+    import mem_gui
+    mb, g = _backend(), mem_gui.gui()
+    if mb is None or g is None:
         return None
-    pos = {t.lower().strip(".:!"): (x, y) for t, x, y in words}
+    core = mb._find_child(mb.data_model, cls="CoreGui")
+    prompt = core and mb._find_child(core, name="RobloxPromptGui")
+    if not prompt:
+        return None
+    nodes = [i for _, i in mb._walk(prompt, 12, 1500)]
+    if not any(_DISCONNECTED.search(mb._content_text(i) or "") and g.is_shown(i) for i in nodes):
+        return None
+    pos = {}
+    for b in nodes:
+        if mb._class_name(b) not in mem_gui.CLICKABLE or not g.is_shown(b):
+            continue
+        texts = [mb._content_text(b)] + [mb._content_text(c) for _, c in mb._walk(b, 3, 30)]
+        word = next((t.strip().lower() for t in texts if t and t.strip().lower() in ("reconnect", "leave")), None)
+        geo = g.geom(b)
+        if word and geo:
+            pos[word] = (geo[0], geo[1])
     return {"reconnect": pos.get("reconnect"), "leave": pos.get("leave")}
 
 
@@ -104,6 +129,10 @@ def reconnect(game, cfg, log=print):
     while time.time() < end:
         box = is_disconnected(game)
         if not box:
+            mb = _backend()
+            if mb and tries:
+                game.wait(10)  # (rejoining: the game is built again in memory)
+                mb.reattach(tries=12, force=True)
             return wait_in_game(game, timeout=120, log=log)
         if tries >= 3 and cfg.get("auto_launch") and box.get("leave"):
             log("Reconnect isn't working; leaving and rejoining.")

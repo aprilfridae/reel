@@ -21,10 +21,8 @@ import os
 import time
 from datetime import datetime
 
-import cv2
-
-import balance  # still available (for the .exe build)
-from memory_backend import get_backend  # the shared memory reader (balance, catches, fishing)
+import balance
+from memory_backend import get_backend  # the shared memory reader: everything the bot looks at is read there
 from mem_reel import MemReel
 import mem_gui
 import chat
@@ -45,10 +43,8 @@ import updater
 import webstate
 from config import load as load_config
 from events import EventWatcher
-from fisher import DEFAULT_LEAD, Fisher  # still available
-from mem_fisher import MemFisher
-from mem_catch_popup import read_catch_popup_mem
-from game import HERE, TEMPLATES, Game, StopBot, WindowLost, find_roblox, window_is_fullscreen
+from fisher import DEFAULT_LEAD, Fisher
+from game import HERE, Game, StopBot, WindowLost, find_roblox, window_is_fullscreen
 from packs import Packs, close_any_menu, close_popup, teleport_to_fishing
 
 FULL_CHECK_EVERY = 60  # seconds; backup Packs-menu check during an event
@@ -56,7 +52,6 @@ EVENT_DEBOUNCE = 8  # seconds a new banner reading must hold before an event sta
 PACKS_MODE_RECHECK = 120  # "open packs" mode: seconds between looks for new packs once none are left
 BALANCE_EVERY = 10  # seconds between balance reads from memory while fishing
 CFG = load_config()
-ATLANTIS_POPUP = os.path.join(HERE, "atlantis_popup.png")
 PACK_SESSION_START, PACK_SESSION_LATEST = CFG["session_start_hour"], CFG["session_end_hour"]
 SESSION_STATE = os.path.join(HERE, "pack_session_done.txt")
 MARKET_EVERY = CFG["market_every_minutes"] * 60  # seconds between market checks
@@ -92,20 +87,21 @@ def main():
     if CFG["fullscreen"]:
         game.ensure_fullscreen(log)
     # (after the first reels, a one-line summary of how fishing runs on this PC goes to the console; nothing is sent anywhere)
-    try:
-        mb = get_backend()  # Roblox's memory, found once and shared with the fisher and the website's poller
-    except Exception as e:
-        mb = None
-        log(f"Memory reading unavailable ({type(e).__name__}: {e}): reading the screen instead")
-    if CFG["memory_fishing"] and mb:
-        fisher = MemFisher(mb=mb, frame=game.frame, log_path=args.log_reels,
-                           settings=lambda: webstate.load("fishing.json", {}))
-        fisher.start()
-    else:  # the fisher that steers the bar onto the fish; during reels it reads them from memory (mem_reel.py)
-        fisher = Fisher(game, args.lead, log_path=args.log_reels,
-                        on_log_ready=lambda extra: log(f"Fishing on this PC: {extra}"),
-                        settings=lambda: webstate.load("fishing.json", {}),
-                        mem_reel=MemReel(mb) if mb and CFG["memory_reel"] else None)
+    mb = None  # Roblox's memory, found once and shared with the fisher and the website's poller: everything is read there
+    for attempt in range(10):
+        try:
+            mb = get_backend()
+            break
+        except Exception as e:
+            log(f"Can't read the game's memory yet ({type(e).__name__}: {e}); trying again in 30 s")
+            game.wait(30)
+    if mb is None:
+        raise SystemExit("The game's memory couldn't be read, and everything the bot does is read from there.")
+    # the fisher that steers the bar onto the fish (the panel, the bar and the fish from memory: mem_reel.py)
+    fisher = Fisher(game, args.lead, log_path=args.log_reels,
+                    on_log_ready=lambda extra: log(f"Fishing on this PC: {extra}"),
+                    settings=lambda: webstate.load("fishing.json", {}),
+                    mem_reel=MemReel(mb))
     packs = Packs(game)
     events = EventWatcher(game)
     chores = gifts.Chores(game, log=log)
@@ -164,7 +160,7 @@ def main():
             cw["checked"] = time.time()
             cw["value"] = talk.pending()
             if talk.due():  # everything slow calls this often, so the chat is also read through them
-                talk.read(game.frame())
+                talk.read()
         return cw["value"]
 
     def send_chat():
@@ -186,15 +182,10 @@ def main():
         return mw["value"]
 
     def check_atlantis():
-        if mb:  # the catch popup's text, from memory: only open the Packs menu when it said Atlantis
-            won_pack, _ = read_catch_popup_mem(game, mb)
-            if not won_pack:
-                return
+        """The catch popup said Atlantis Pack (the fisher read it): open it."""
         n = packs.open_pack("atlantis", should_stop=interrupted)
         if n:
             log(f"Opened Atlantis pack x{n}")
-            if not mb and fisher.last_popup is not None and not os.path.exists(ATLANTIS_POPUP):
-                cv2.imwrite(ATLANTIS_POPUP, fisher.last_popup)
 
     state = {"pack": None, "last_full": 0.0, "ended": None}
     talk = chat.Chat(game)
@@ -393,28 +384,28 @@ def main():
     def open_event_packs(pack):
         if not auto():
             return
-        if not os.path.exists(os.path.join(TEMPLATES, f"pack_{pack}.png")):
-            log(f"Don't know what the {pack} pack looks like in the menu yet; skipping.")
+        if not packs.has_tile(pack):
+            log(f"There's no {pack.replace('_', ' ')} pack in the Packs menu; skipping.")
             return
         n = packs.open_pack(pack, should_stop=interrupted)
         if n:
             log(f"Opened {pack.replace('_', ' ')} x{n}")
 
     def watch(img, reeling):
-        """Runs on every frame while fishing; True means 'stop and act()'.
-        During a reel only cheap work: changed labels are kept and read afterwards."""
+        """Runs a few times a second while fishing (img: None, everything is read from memory); True means 'stop and
+        act()'. During a reel only cheap work: a pack the auto-roll label names is kept and looked at afterwards."""
         if reeling:
-            events.update_label(img, defer=True)
+            events.update_label(defer=True)
             return False
         if time.time() - dc["checked"] > 20:  # the internet dropped? (Roblox's "Disconnected" box)
             dc["checked"] = time.time()
-            if launcher.is_disconnected(game, img):
+            if launcher.is_disconnected(game):
                 raise WindowLost()  # handled in the main loop: reconnect, then carry on
-        if tflow.poll(img):  # a trade window or request popup showed up, or the website sent a trade command
+        if tflow.poll():  # a trade window or request popup showed up, or the website sent a trade command
             return True
-        outbids.poll(img)
+        outbids.poll()
         if talk.due():
-            talk.read(img)
+            talk.read()
         # balance from memory instead of OCR (it walks the whole GUI: not on every frame)
         if mb and time.time() - coins["at"] > BALANCE_EVERY:
             coins["at"] = time.time()
@@ -425,7 +416,7 @@ def main():
             except Exception:
                 pass
         rolled_during_reel = events.read_deferred()
-        events.update_banner(img)
+        events.update_banner()
         raw_pack = events.pack
         if raw_pack == state["pack"]:
             ev["val"] = "?"
@@ -445,7 +436,7 @@ def main():
                 log(f"Event started: {events.name} (pack: {pack})")
                 state["last_full"] = time.time()
             state["pack"] = pack
-        rolled = events.update_label(img)
+        rolled = events.update_label()
         if state["ended"] or chores_due() or web_wants_something():
             return True
         if pack and pack != "meteor":
@@ -547,7 +538,7 @@ def main():
     def one_round():
         if time.time() - tidy["seen"] > 1800 and mem_gui.stats != tidy["stats"]:  # how buttons were found lately
             tidy["seen"], tidy["stats"] = time.time(), dict(mem_gui.stats)
-            log("Buttons found: {memory} from memory, {screen} on screen ({missing} looks with nothing there)".format(**mem_gui.stats))
+            log("Buttons found in memory: {memory} ({missing} looks with nothing there)".format(**mem_gui.stats))
         if time.time() - tidy["at"] > 6 * 3600:  # old pictures off the disk: at start-up, then every 6 hours
             tidy["at"] = time.time()
             try:
@@ -568,16 +559,16 @@ def main():
                 game.ensure_fullscreen(log)
             elif window_is_fullscreen(game.hwnd):
                 fs["tries"] = 0
-        frame = game.frame()
-        outbids.poll(frame)
-        tflow.poll(frame)  # (throttled) a trade window may have been open since before this round
+        game.alive()
+        outbids.poll()
+        tflow.poll()  # (throttled) a trade window may have been open since before this round
         if tflow.busy() or tflow.has_cmds():
             tflow.handle()  # a trade window is open (nothing else may click around), or the website asked
             return
         if chat_waiting():
             send_chat()
             return
-        events.update_banner(game.frame(), every=0)
+        events.update_banner(every=0)
         log(f"Event: {events.describe()}")
         if market_work():
             market_trip()

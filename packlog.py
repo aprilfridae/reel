@@ -1,21 +1,18 @@
-"""The website's live log of packs: every pack the bot opens (with any #1 cards seen on its reveal screen) and the
-auto-roll's packs (counted from the label at the bottom right; the rarer ones are listed one by one).
+"""The website's live log of packs: every pack the bot opens (with the cards on its reveal, read from memory: the
+website draws them from their artwork) and the auto-roll's packs (counted from the label at the bottom right; the
+rarer ones are listed one by one).
 
-  packlog.json    [{id, ts, time, kind: "open"|"roll", pack, ones, shot, n}]   newest last, 300 kept
-  packroll.json   {since, total, by_kind: {"gold": 120, ...}, last, at}         the roll counter
+  packlog.json    [{id, ts, time, kind: "open"|"roll", pack, ones, cards, n}]   newest last, 300 kept
+                  (entries from before memory reading have a screenshot, "shot", instead of "cards")
+  packroll.json   {since, total, by_kind: {"gold": 120, ...}, last, at}          the roll counter
 """
-import os
 import re
 import threading
 import time
 import uuid
 
-import cv2
-
 import webstate
-from paths import APP
 
-SHOTS = os.path.join(APP, "web", "static", "packs")
 KEEP = 300
 NOTABLE_ROLLS = {"iced", "radiation", "kawaii", "glitched", "atlantis", "blood_moon", "eclipse", "meteor", "acid",
                  "tsunami", "storm", "volcano"}  # (listed one by one; the rest are only counted)
@@ -34,22 +31,11 @@ def _add(entry):
     webstate.update("packlog.json", [], lambda log: (log + [entry])[-KEEP:])
 
 
-KEEP_SHOTS = 150  # reveal pictures kept (older ones are deleted; their log lines keep no picture)
-
-
-def record_open(pack, n, img, ones=0, others=()):
-    """One pack reveal, with a picture of it for the website."""
-    shot = None
-    try:
-        os.makedirs(SHOTS, exist_ok=True)
-        shot = f"pk_{int(time.time() * 1000)}.jpg"
-        small = cv2.resize(img, (960, int(img.shape[0] * 960 / img.shape[1])), interpolation=cv2.INTER_AREA)
-        cv2.imwrite(os.path.join(SHOTS, shot), small, [cv2.IMWRITE_JPEG_QUALITY, 72])
-        for old in sorted(os.listdir(SHOTS))[:-KEEP_SHOTS]:
-            os.remove(os.path.join(SHOTS, old))
-    except OSError:
-        shot = None
-    _add({"kind": "open", "pack": _human(pack), "ones": int(ones), "others": list(others), "shot": shot, "n": n})
+def record_open(pack, n, cards=()):
+    """One pack reveal, with its cards ({name, serial, rarity, art, ...})."""
+    cards = [dict(c) for c in cards]
+    ones = sum(str(c.get("serial")) == "1" for c in cards)
+    _add({"kind": "open", "pack": _human(pack), "ones": ones, "cards": cards, "n": n})
 
 
 _COUNT = re.compile(r"\+\s*([\d,]+)\s*packs?", re.I)

@@ -1,10 +1,10 @@
-"""Playtime gifts and the daily spin.
+"""Playtime gifts and the daily spin, read and clicked from memory.
 
-Left side: the rainbow "CLAIM GIFT!" button opens Playtime Gifts, where each ready
-tier has a green "CLAIM!" button. If the button only shows a timer, nothing is ready.
-Right side: the "Daily" button opens the spin wheel (or, once today's is used, the Daily
-Spin box with "NEXT SPIN IN hh:mm:ss"); a new spin unlocks at 16:00 local time each day.
-The buttons are found in memory (mem_gui) by their text or name, else by reading the screen's text (OCR).
+Left side: CardsUI's PlaytimeGiftBtn says "New gifts in" / "12:55:36" while nothing is ready, and "CLAIM GIFT!" when
+something is; it opens PlaytimeGifts (a full-screen frame in CardsUI), where each ready tier has a "CLAIM!" button.
+Right side: DailyBtn ("Daily", with a "12:55:37" countdown under it once today's spin is used) opens DailyUI: the wheel
+(its "SPIN" button in the middle), or the "🎁 DAILY SPIN" box with the streak days and "NEXT SPIN IN ...". A new spin
+unlocks at 16:00 local time each day.
 """
 import os
 import re
@@ -13,66 +13,80 @@ from datetime import datetime, timedelta
 
 import mem_gui
 from game import HERE
-from ocr import read_words
 from packs import close_any_menu, close_popup
 
+_TIMER = re.compile(r"\d{1,2}:\d{2}:\d{2}")
 
-def _words(game, img, box):
-    """OCR words inside box (x0, y0, x1, y1 as fractions of the window)."""
-    h, w = img.shape[:2]
-    x0, y0, x1, y1 = int(box[0] * w), int(box[1] * h), int(box[2] * w), int(box[3] * h)
-    return [(t, x0 + x, y0 + y) for t, x, y in read_words(img[y0:y1, x0:x1])]
+
+def _labels(inst, depth=3):
+    """The showing texts under `inst` (its own included)."""
+    g = mem_gui.gui()
+    if g is None or inst is None:
+        return []
+    mb = g.mb
+    return [t for _, o in mb._walk(inst, depth, 200)
+            if mb._class_name(o) in mem_gui.TEXT_CLASSES and (t := (mb._content_text(o) or "").strip())
+            and g.is_shown(o)]
+
+
+def _child(screen, name):
+    sg = mem_gui.screen(screen)
+    g = mem_gui.gui()
+    if sg is None or g is None:
+        return None
+    return next((o for _, o in g.mb._walk(sg, 4, 4000) if g.mb._name(o) == name), None)
 
 
 def close_menus(game):
     return close_any_menu(game)
 
 
-_close = close_menus
+def _close_gifts(game):
+    """PlaytimeGifts' own X (a small square button at its top right), else whatever menu is open."""
+    g, overlay = mem_gui.gui(), _child("CardsUI", "PlaytimeGifts")
+    if g is not None and overlay is not None and g.is_shown(overlay):
+        x = mem_gui.close_x(overlay)
+        if x is None:
+            small = [(geo, b) for _, b in mem_gui.buttons(overlay, depth=3)
+                     if (geo := g.geom(b)) and 30 < geo[2] < 70 and abs(geo[2] - geo[3]) < 6 and g.is_shown(b)]
+            x = max(small, key=lambda s: s[0][0])[1] if small else None
+        if x is not None and mem_gui.click(game, x):
+            game.wait(0.6)
+            return
+    close_any_menu(game)
 
 
-LEFT_BUTTONS = (0.0, 0.35, 0.12, 0.62)  # left column, around the Claim Gift button
-RIGHT_BUTTONS = (0.86, 0.35, 1.0, 0.75)  # right column, around Daily
-MIDDLE = (0.15, 0.15, 0.85, 0.85)
-
-
-def gift_ready(game, img):
-    """Position of the CLAIM GIFT button if it says a gift is ready, else None (memory first, then the screen)."""
-    mem = mem_gui.locate(text="claim", screen="CardsUI", exact=False)
-    if mem and mem[0] < img.shape[1] * 0.2:  # (the left column)
-        mem_gui.stats["memory"] += 1
-        return mem[0], mem[1]
-    words = _words(game, img, LEFT_BUTTONS)
-    for t, x, y in words:
-        if t.upper().startswith("CLAIM"):
-            return x, y
+def gift_ready(game=None, img=None):
+    """The CLAIM GIFT button if it says a gift is ready, else None."""
+    btn = _child("CardsUI", "PlaytimeGiftBtn")
+    if not mem_gui.shown(btn):
+        return None
+    texts = _labels(btn)
+    if any(t.lower().startswith("claim") for t in texts) or (texts and not any(_TIMER.fullmatch(t) for t in texts)):
+        return btn  # (says CLAIM, or at least no longer counts down to the next one)
     return None
 
 
 def claim_gifts(game, log=print):
     """Open Playtime Gifts and press every CLAIM! button. Returns how many."""
     close_popup(game)
-    img = game.frame()
-    spot = gift_ready(game, img)
-    if not spot:
+    btn = gift_ready(game)
+    if btn is None or not mem_gui.click(game, btn):
         return 0
-    game.click(*spot)
-    game.park_mouse()
     game.wait(1.2)
     claimed = 0
     for _ in range(12):
-        img = game.frame()
-        mem = mem_gui.locate(text="CLAIM!", screen="GiftUI") or mem_gui.locate(text="CLAIM", screen="GiftUI")
-        buttons = [(mem[0], mem[1])] if mem else [
-            (x, y) for t, x, y in _words(game, img, MIDDLE) if re.fullmatch(r"claim!?", t.strip().lower())]  # not "Claimed"
-        if not buttons:
+        overlay = _child("CardsUI", "PlaytimeGifts")
+        if not mem_gui.shown(overlay):
             break
-        mem_gui.stats["memory" if mem else "screen"] += 1
-        game.click(*buttons[0])
-        game.park_mouse()
+        ready = next((b for t, b in mem_gui.buttons(overlay, depth=4)
+                      if re.fullmatch(r"claim!?", (t or " ".join(_labels(b, 1))).strip().lower())  # (not "Claimed")
+                      and mem_gui.shown(b)), None)
+        if ready is None or not mem_gui.click(game, ready):
+            break
         claimed += 1
         game.wait(1.0)
-    _close(game)
+    _close_gifts(game)
     if claimed:
         log(f"Claimed {claimed} playtime gift(s)")
     return claimed
@@ -83,7 +97,7 @@ SPIN_STATE = os.path.join(HERE, "daily_spin_done.txt")
 
 
 def _spin_period():
-    """Which daily-spin window we're in: the date the current 17:00-to-17:00 began."""
+    """Which daily-spin window we're in: the date the current 16:00-to-16:00 began."""
     return (datetime.now() - timedelta(hours=SPIN_UNLOCK_HOUR)).date().isoformat()
 
 
@@ -99,69 +113,64 @@ def _mark_spin_done():
         f.write(_spin_period())
 
 
-_TIMER = re.compile(r"\d{1,2}:\d{2}:\d{2}")
+def _spin_button():
+    """The wheel's SPIN button, while the wheel is showing."""
+    return mem_gui.button(mem_gui.screen("DailyUI"), "SPIN", depth=8)
 
 
-def _menu_text(game):
-    return " ".join(w[0] for w in _words(game, game.frame(), MIDDLE)).upper()
-
-
-def _is_wheel(text):
-    """The wheel screen ("DAY 5 SPIN", "12 prizes", "jackpot", "Streak rewards")."""
-    return any(k in text for k in ("PRIZES", "JACKPOT", "STREAK REWARDS")) and "NEXT SPIN" not in text
-
-
-def _is_summary(text):
+def _is_summary():
     """The Daily Spin box with the streak days, today's prize and "NEXT SPIN IN hh:mm:ss"."""
-    return "NEXT SPIN" in text or "DAILY SPIN" in text or "COME BACK" in text
+    text = " ".join(_labels(mem_gui.screen("DailyUI"), 8)).upper()
+    return _spin_button() is None and any(k in text for k in ("NEXT SPIN", "DAILY SPIN", "COME BACK"))
+
+
+def _close_daily(game):
+    g, sg = mem_gui.gui(), mem_gui.screen("DailyUI")
+    if g is not None and sg is not None and g.screen_on("DailyUI"):
+        x = mem_gui.button(sg, "X", depth=8)
+        if x is not None and mem_gui.click(game, x):
+            game.wait(0.6)
+            return
+    close_any_menu(game)
 
 
 def daily_spin(game, log=print):
-    """Spin the daily wheel once a day (it unlocks at 16:00 local time). The Daily button
-    shows a timer under its name once today's spin is used. When it's ready, the button
-    opens the wheel: its green SPIN button is in the wheel's centre (OCR can't read it
-    reliably, it pulses), and after the spin the Daily Spin box with "NEXT SPIN IN ..."
-    comes up. Returns True if it spun."""
+    """Spin the daily wheel once a day (it unlocks at 16:00 local time). The Daily button shows a countdown under its
+    name once today's spin is used; when it's ready, the button opens the wheel, and after the spin the Daily Spin box
+    with "NEXT SPIN IN ..." comes up. Returns True if it spun."""
     if _spin_done_this_period():
         return False
     close_popup(game)
-    img = game.frame()
-    words = _words(game, img, RIGHT_BUTTONS)
-    daily = [(x, y) for t, x, y in words if t.lower().startswith("daily")]
-    if not daily:
+    daily = _child("CardsUI", "DailyBtn")
+    if not mem_gui.shown(daily):
         return False
-    if any(_TIMER.fullmatch(t) and abs(y - daily[0][1]) < 60 for t, x, y in words):
+    if any(_TIMER.fullmatch(t) for t in _labels(daily)):
         _mark_spin_done()  # a countdown under "Daily": already spun
         return False
-    mem = mem_gui.locate(name="DailyBtn", screen="CardsUI")
-    mem_gui.stats["memory" if mem else "screen"] += 1
-    game.click(*((mem[0], mem[1]) if mem else daily[0]))
-    game.park_mouse()
-    text = ""
+    if not mem_gui.click(game, daily):
+        return False
+    spin = None
     for _ in range(5):
         game.wait(0.6)
-        text = _menu_text(game)
-        if _is_wheel(text) or _is_summary(text):
+        spin = _spin_button()
+        if spin is not None or _is_summary():
             break
-    if _is_summary(text):
-        _mark_spin_done()  # nothing to spin
-        _close(game)
+    if spin is None:
+        if _is_summary():
+            _mark_spin_done()  # nothing to spin
+        else:
+            log("Clicked Daily but the Daily Spin menu didn't open")
+        _close_daily(game)
         return False
-    if not _is_wheel(text):
-        log(f"Clicked Daily but the Daily Spin menu didn't open (read: {text[:80]!r})")
-        _close(game)
-        return False
-    h, w = game.frame().shape[:2]
-    game.click(w // 2, h // 2)
-    game.park_mouse()
+    mem_gui.click(game, spin)
     log("Spun the daily wheel")
     for _ in range(20):  # the wheel turns for about 6 seconds, then the prize box shows
         game.wait(1.0)
-        if _is_summary(_menu_text(game)):
+        if _is_summary():
             break
     _mark_spin_done()
     close_popup(game)
-    _close(game)
+    _close_daily(game)
     return True
 
 

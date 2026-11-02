@@ -10,8 +10,8 @@ enabled, it and all its parents are visible, and it isn't scrolled out of a list
 A match by text is clicked at the text's own centre: a button frame's reported position can lag behind (seen on the
 Packs menu's OPEN buttons), while the text inside it is where it's drawn.
 
-locate() returns (x, y, 1.0) like Game.find(), or None, so a call site keeps its screen way as the backup:
-    hit = locate(text="Packs", screen="CardsUI") or game.find("packs_button", img)
+locate() returns (x, y, 1.0), or None:
+    hit = locate(text="Packs", screen="CardsUI")
 """
 import re
 import struct
@@ -48,7 +48,10 @@ def gui():
             _gui["obj"] = MemGui(get_backend())
         except Exception:
             _gui["obj"] = None
-    return _gui["obj"]
+    g = _gui["obj"]
+    if g is not None and g._gen != getattr(g.mb, "generation", 0):  # the game was found again (reconnected)
+        g._gen, g._memo = getattr(g.mb, "generation", 0), {}
+    return g
 
 
 def locate(text=None, screen=None, name=None, cls=None, within=None, exact=True, contains=False):
@@ -94,10 +97,92 @@ def _norm(s):
     return re.sub(r"\s+", " ", (s or "").strip().lower())
 
 
+# ---- finding things by the menus' structure (the CardsUI menus are frames under CardsUI > Root, each with its
+# title as a label: "Packs  •  242822", "Index  11552/19394", "Rebirth"...) ----
+def screen(name):
+    """A ScreenGui (or other PlayerGui child) by name, or None."""
+    g = gui()
+    if g is None:
+        return None
+    return next((s for s in g.mb._children(g.mb.player_gui) if g.mb._name(s) == name), None)
+
+
+def cards_root():
+    sg = screen("CardsUI")
+    return sg and gui().mb._find_child(sg, name="Root")
+
+
+def panel(title):
+    """The CardsUI menu whose title label matches the regex `title` (from its start), or None."""
+    g, root = gui(), cards_root()
+    if root is None:
+        return None
+    mb = g.mb
+    for fr in mb._children(root):
+        for c in mb._children(fr):
+            if mb._class_name(c) == "TextLabel" and re.match(title, (mb._content_text(c) or "").strip(), re.I):
+                return fr
+    return None
+
+
+def text_of(inst):
+    """A button's text: its "Label" child's (the game's buttons keep it there), else its own."""
+    mb = gui().mb
+    lab = mb._find_child(inst, name="Label")
+    t = mb._content_text(lab) if lab else None
+    if not t and mb._class_name(inst) in TEXT_CLASSES:
+        t = mb._content_text(inst)
+    return (t or "").strip()
+
+
+def buttons(under, depth=6, max_nodes=3000):
+    """[(text, button)] of every TextButton / ImageButton under `under`."""
+    g = gui()
+    if g is None or under is None:
+        return []
+    mb = g.mb
+    return [(text_of(o), o) for d, o in mb._walk(under, depth=depth, max_nodes=max_nodes)
+            if mb._class_name(o) in CLICKABLE]
+
+
+def button(under, text, depth=6, exact=True, shown=True):
+    """The first (showing) button under `under` whose text is `text` (starts with it if not exact), or None."""
+    want = _norm(text)
+    for t, b in buttons(under, depth):
+        have = _norm(t)
+        if (have == want if exact else have.startswith(want)) and (not shown or gui().is_shown(b)):
+            return b
+    return None
+
+
+def close_x(under):
+    """A menu's red X: its showing button that says "X"."""
+    return button(under, "X", depth=3)
+
+
+def click(game, inst, park=True):
+    """Click an object's centre (a button's at its text: the button frame's own position can lag behind where it's
+    drawn). False if it has no place on the screen."""
+    lab = gui().mb._find_child(inst, name="Label") if inst else None
+    g = gui().geom(lab or inst) if inst else None
+    if not g or g[2] <= 0 or g[3] <= 0:
+        return False
+    game.click(g[0], g[1])
+    if park:
+        game.park_mouse()
+    return True
+
+
+def shown(inst):
+    g = gui()
+    return bool(g and inst and g.is_shown(inst))
+
+
 class MemGui:
     def __init__(self, mb):
         self.mb = mb
         self._memo = {}  # query -> (address, when)
+        self._gen = getattr(mb, "generation", 0)
 
     def screen_on(self, screen):
         sg = next((s for s in self.mb._children(self.mb.player_gui) if self.mb._name(s) == screen), None)
@@ -108,6 +193,8 @@ class MemGui:
         """Its ScreenGui is enabled, it and every parent are visible, and its centre isn't scrolled out of view."""
         mb, node = self.mb, inst
         g = self.geom(inst)
+        if g and (g[1] + g[3] / 2 < 0 or g[0] + g[2] / 2 < 0):
+            return False  # slid off the screen's top or left (how the game hides its request popups)
         for _ in range(40):
             if node is None:
                 return False

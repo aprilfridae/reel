@@ -37,26 +37,19 @@ def start_website(port):
 
 
 def selftest():
-    """--selftest: check that the pieces a packaged copy needs work (text reading, the
-    button pictures, screen capture libraries) without touching the game. Exit code 1 if any don't."""
-    import importlib.util
+    """--selftest: check that the pieces a packaged copy needs load (the game's memory reader, the bot, the
+    website) without touching the game. Exit code 1 if any don't."""
+    import importlib
 
-    import cv2
-    import numpy as np
-
-    from game import TEMPLATES
-    from ocr import read_text
-
-    img = np.full((120, 500, 3), 255, np.uint8)
-    cv2.putText(img, "Rebirths: 120", (10, 80), cv2.FONT_HERSHEY_SIMPLEX, 2, (0, 0, 0), 4)
-    text = read_text(img)
-    ok_text = "120" in text
-    print("text reading:", "OK" if ok_text else f"FAILED (read {text!r})")
-    n = len([f for f in os.listdir(TEMPLATES) if f.endswith(".png")])
-    print(f"button pictures: {n} found", "(OK)" if n > 30 else "(FAILED)")
-    ok_capture = importlib.util.find_spec("dxcam") is not None
-    print("screen capture library:", "OK" if ok_capture else "MISSING")
-    return 0 if ok_text and n > 30 and ok_capture else 1
+    ok = True
+    for name in ("memory_backend", "mem_gui", "bot", "web.app"):
+        try:
+            importlib.import_module(name)
+            print(f"{name}: OK")
+        except Exception as e:
+            print(f"{name}: FAILED ({e})")
+            ok = False
+    return 0 if ok else 1
 
 
 def main():

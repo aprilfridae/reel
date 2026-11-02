@@ -111,7 +111,7 @@ def state():
     now = time.time()
     trade = {**webstate.load("trade.json", {}), "cmds": webstate.load("trade_cmd.json", [])[-8:]}
     if trade.get("open") and now - float(trade.get("ts") or 0) > 120:
-        # an open trade window is saved every couple of seconds (its picture): this one is left over (the bot
+        # an open trade window is saved at least every 30 seconds: this one is left over (the bot
         # stopped, or the game closed under it), so it isn't shown as open
         trade.update(open=None, offer=None, stale=True)
     market["cards"] = [c for c in market.get("cards", [])  # drop auctions that have ended
@@ -121,8 +121,8 @@ def state():
     card_art.attach(trade)
     return jsonify({
         "market": market,
-        "ones": [{k: v for k, v in e.items() if k != "fp"}  # all-time #1 cards (fp is internal)
-                 for e in webstate.load("ones.json", [])],
+        "ones": card_art.attach([{k: v for k, v in e.items() if k != "fp"}  # all-time #1 cards (fp is internal)
+                                 for e in webstate.load("ones.json", [])]),
         "requests": webstate.load("requests.json", [])[-50:],
         "chat": webstate.load("chat.json", [])[-200:],
         "outbox": webstate.load("outbox.json", []),
@@ -136,13 +136,12 @@ def state():
         "bid_anyway": bid_anyway(),
         "bids_seen": webstate.load("bids_seen.json", {}),
         "trade": trade,
-        "packlog": {"log": webstate.load("packlog.json", [])[-80:], "roll": webstate.load("packroll.json", {})},
-        "outbid": webstate.load("outbid.json", [])[-20:],
+        "packlog": {"log": card_art.attach(webstate.load("packlog.json", [])[-80:]), "roll": webstate.load("packroll.json", {})},
+        "outbid": card_art.attach(webstate.load("outbid.json", [])[-20:]),
         "mem": {  # live memory-polled data (always fresh)
             "balance": webstate.load("balance.json", {}),
             "fishing": webstate.load("mem_fishing.json", {}),
             "event": webstate.load("mem_event.json", {}),
-            "outbid": webstate.load("mem_outbid.json", []),
             "trade_incoming": webstate.load("mem_trade.json", {}),
         },
         "fishing": {**webstate.load("fishcal.json", {}), "settings": webstate.load("fishing.json", {})},
@@ -281,10 +280,9 @@ def trade_cmd():
         args["tab"] = "mine" if body.get("tab") == "mine" else "theirs"
         args["query"] = str(body.get("query", "")).strip()[:30]
     if cmd in ("add", "remove", "want"):
-        # the card as the website listed it: its place in the game's order and its picture find it on screen
-        args = {k: str(body.get(k, "")).strip()[:40] for k in ("name", "serial", "rarity", "query")}
+        # the card as the website listed it (its name, serial / copy number and place in the game's order)
+        args = {k: str(body.get(k, "")).strip()[:40] for k in ("name", "serial", "rarity", "copy", "query")}
         args["rank"] = str(int(body["rank"])) if str(body.get("rank", "")).isdigit() else ""
-        args["img"] = body["img"] if re.fullmatch(r"[0-9a-f]{12}\.jpg", str(body.get("img", ""))) else ""
         if not args["name"]:
             return jsonify(error="which card?"), 400
     if cmd == "coins":

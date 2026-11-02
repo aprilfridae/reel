@@ -1,22 +1,19 @@
 """Glue between the bot, the game's Trade window and the website (trade.json / trade_cmd.json).
 
 The bot never completes a trade by itself. When a trade window is open it puts both card lists in serial
-order, reads the first cards of each (plus which of mine the other player wants) for the website, and keeps a
-small live picture there; every action (accept/decline a request, send one, add / take out / ask for a card,
-coins, READY, Cancel, search, rescan) only happens when the website asks for it.
+order, reads the first cards of each (plus which of mine the other player wants) for the website, and keeps both
+offers there up to date (all read in memory; the website draws the cards from their artwork); every action
+(accept/decline a request, send one, add / take out / ask for a card, coins, READY, Cancel, search, rescan) only
+happens when the website asks for it.
 """
-import os
+import json
 import time
-
-import cv2
 
 import chat
 import trade
 import webstate
-from paths import APP
 
-SNAPSHOT = os.path.join(APP, "web", "static", "trade.jpg")
-SNAP_EVERY = 2.0  # seconds between live pictures while a trade window is open
+OFFERS_EVERY = 1.0  # seconds between looks at the two offers while a trade window is open
 POLL_EVERY = 1.5  # seconds between looks for a window / request popup while fishing
 LIST_LIMIT = 40  # cards read from each list (the website shows the 20 lowest serials)
 WANTS_EVERY = 3.0  # seconds between looks at "they want N of your cards" while a trade window is open
@@ -28,7 +25,7 @@ class TradeFlow:
         self.open = None  # the other player's name while the trade window is up
         self.popup = None  # a pending request popup
         self.checked = 0.0
-        self.snap_at = 0.0
+        self.offers_at = 0.0
         self.window_seen_at = None  # when the current window was first seen (for the one-off sort + read)
         self.cmds_at = 0.0
         self.cmds_waiting = False
@@ -50,15 +47,15 @@ class TradeFlow:
 
     # ---------- noticing ----------
 
-    def poll(self, img):
-        """Cheap look (called with whole frames while fishing, at most every POLL_EVERY seconds).
+    def poll(self, img=None):
+        """Cheap look (called while fishing, at most every POLL_EVERY seconds).
         True when the bot should stop and handle() something."""
         now = time.time()
         if now - self.checked < POLL_EVERY:
             return False
         self.checked = now
-        name = trade.window_open(self.game, img)
-        popup = None if name else trade.incoming(self.game, img)
+        name = trade.window_open()
+        popup = None if name else trade.incoming()
         changed = name != self.open or bool(popup) != bool(self.popup)
         self.open, self.popup = name, popup
         if not name and self.window_seen_at is not None:
@@ -92,27 +89,21 @@ class TradeFlow:
         self.cmds_at = 0.0
 
     def read_offers(self, force=False):
-        """What each side has put in the trade (re-read only when that part of the screen changed)."""
-        img = self.game.frame()
-        s = self.game.ui_scale(img)
-        ox, oy = trade._origin(img, s)
-        x0, y0, x1, y1 = (int(ox + 1060 * s), int(oy + 170 * s), int(ox + 1725 * s), int(oy + 912 * s))
-        sig = cv2.resize(img[y0:y1, x0:x1], (48, 48), interpolation=cv2.INTER_AREA).astype("int16")
-        old = getattr(self, "_offer_sig", None)
-        if not force and old is not None and abs(sig - old).mean() < 2.5:
+        """What each side has put in the trade (saved for the website only when it changed)."""
+        self.offers_at = time.time()
+        offer = {"mine": trade.read_offer(self.game, None, "mine"), "theirs": trade.read_offer(self.game, None, "theirs")}
+        sig = json.dumps(offer, sort_keys=True)
+        if not force and sig == getattr(self, "_offer_sig", None):
+            if time.time() - getattr(self, "_offer_saved", 0) > 30:  # (the website takes an unsaved window as gone)
+                self._offer_saved = time.time()
+                self._save()
             return
-        self._offer_sig = sig
-        self._save(offer={"mine": trade.read_offer(self.game, img, "mine", scrolling=True),
-                          "theirs": trade.read_offer(self.game, self.game.frame(), "theirs", scrolling=True),
-                          "at": time.strftime("%H:%M:%S")})
+        self._offer_sig, self._offer_saved = sig, time.time()
+        self._save(offer={**offer, "at": time.strftime("%H:%M:%S")})
 
     def snapshot(self):
-        img = self.game.frame()
-        small = cv2.resize(img, (960, int(img.shape[0] * 960 / img.shape[1])), interpolation=cv2.INTER_AREA)
-        os.makedirs(os.path.dirname(SNAPSHOT), exist_ok=True)
-        cv2.imwrite(SNAPSHOT, small, [cv2.IMWRITE_JPEG_QUALITY, 70])
-        self.snap_at = time.time()
-        self._save(snap=int(self.snap_at))
+        """(Kept for the commands that ended with a new picture: the offers are read again instead.)"""
+        self.read_offers()
 
     # ---------- reading ----------
 
@@ -121,7 +112,7 @@ class TradeFlow:
         g = self.game
         trade.ensure_serial(g, self.log)
         trade.show_tab(g, "mine")
-        wanted_n = trade.read_wanted_header(g, g.frame())
+        wanted_n = trade.read_wanted_header()
         mine = trade.read_cards(g, min(LIST_LIMIT, 20 + wanted_n), self.log)
         trade.show_tab(g, "theirs")
         theirs = trade.read_cards(g, 20, self.log)
@@ -138,7 +129,7 @@ class TradeFlow:
         if time.time() - self.wants_at < WANTS_EVERY:
             return
         self.wants_at = time.time()
-        n = trade.read_wanted_header(self.game, self.game.frame())
+        n = trade.read_wanted_header()
         if n == self.wanted_n:
             self.wants_seen = (n, 0)
             return
@@ -167,9 +158,9 @@ class TradeFlow:
     def handle(self):
         """One pass: refresh what's on screen, do the website's commands, keep the picture current."""
         g = self.game
-        img = g.frame()
-        name = trade.window_open(g, img)
-        popup = None if name else trade.incoming(g, img)
+        g.alive()
+        name = trade.window_open()
+        popup = None if name else trade.incoming()
         if name != self.open or bool(popup) != bool(self.popup):
             self._save(open=name, incoming=popup and {"name": popup["name"], "at": time.strftime("%H:%M:%S")})
         self.open, self.popup = name, popup
@@ -183,8 +174,7 @@ class TradeFlow:
                 self.log(f"(couldn't read the trade window: {type(e).__name__}: {e})")
         elif not name and self.window_seen_at is not None:
             self._window_closed()
-        if name and time.time() - self.snap_at > SNAP_EVERY:
-            self.snapshot()
+        if name and time.time() - self.offers_at > OFFERS_EVERY:
             try:
                 self.read_offers()
             except Exception as e:
@@ -227,13 +217,13 @@ class TradeFlow:
             self.read_offers(force=True)
             return bool(added), (f"added {', '.join(added)} to the offer" if added else "no wanted cards found")
         if cmd in ("add", "remove"):
-            card = {k: str(a.get(k, ""))[:40] for k in ("name", "serial", "rarity", "rank", "img", "query")}
+            card = {k: str(a.get(k, ""))[:40] for k in ("name", "serial", "rarity", "rank", "copy", "query")}
             ok, msg = (trade.add_card if cmd == "add" else trade.remove_card)(g, card, self.log)
             self.read_offers(force=True)
             self.snapshot()
             return ok, msg
         if cmd == "want":  # ask for one of their cards
-            card = {k: str(a.get(k, ""))[:40] for k in ("name", "serial", "rarity", "rank", "img", "query")}
+            card = {k: str(a.get(k, ""))[:40] for k in ("name", "serial", "rarity", "rank", "copy", "query")}
             ok, msg, now = trade.request_card(g, card, self.log)
             if now is not None:  # mark it on the website's list (and in a search's results) as asked for or not
                 def mark(t):

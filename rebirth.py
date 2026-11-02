@@ -16,11 +16,11 @@ import time
 
 import tz
 
+import mem_gui
 import webstate
 from balance import read_balance
 from game import HERE
-from market_scan import amount_value, fix_numbers
-from ocr import read_words
+from market_scan import amount_value
 from packs import close_any_menu, close_popup
 
 STATE_FILE = os.path.join(HERE, "rebirth_state.json")
@@ -28,16 +28,30 @@ FRACTION = 0.25  # of the coins on hand, per night
 MAX_PER_REQUEST = 50
 
 
-def _menu_words(game, img=None):
-    img = game.frame() if img is None else img
-    h, w = img.shape[:2]
-    x0, y0, x1, y1 = int(w * 0.2), int(h * 0.12), int(w * 0.8), int(h * 0.9)
-    return [(t, x0 + x, y0 + y) for t, x, y in read_words(img[y0:y1, x0:x1], scale=2)], (x0, y0, x1, y1)
+# The menu, in memory: a frame under CardsUI > Root titled "Rebirth", holding "Rebirths: 145", "🍀 Luck now" / "x37.25",
+# "🍀 After rebirth" / "x37.50", "Cost: 💰 106.6B" and the big button (its text in a "Label" child: "REBIRTH", then a
+# confirm prompt after the first click).
+def _panel():
+    return mem_gui.panel(r"Rebirth\s*$")
 
 
-def menu_open(game, img=None):
-    words, _ = _menu_words(game, img)
-    return any(t.lower().startswith("rebirths") for t, _, _ in words)
+def _texts(under, depth=8, max_nodes=3000):
+    """[(text, object)] of the showing labels / buttons under `under`, in the menu's order."""
+    g = mem_gui.gui()
+    if g is None or under is None:
+        return []
+    mb = g.mb
+    out = []
+    for _, o in mb._walk(under, depth, max_nodes):
+        if mb._class_name(o) in mem_gui.TEXT_CLASSES:
+            t = (mb._content_text(o) or "").strip()
+            if t and g.is_shown(o):
+                out.append((t, o))
+    return out
+
+
+def menu_open(game=None, img=None):
+    return mem_gui.shown(_panel())
 
 
 def open_menu(game):
@@ -45,14 +59,11 @@ def open_menu(game):
     close_popup(game)
     close_any_menu(game)
     for _ in range(3):
-        img = game.frame()
-        h, w = img.shape[:2]
-        words = read_words(img[int(h * 0.3):int(h * 0.85), int(w * 0.86):], scale=2)
-        spot = next(((int(w * 0.86) + x, int(h * 0.3) + y) for t, x, y in words if t.lower() == "rebirth"), None)
+        spot = mem_gui.locate(text="Rebirth", screen="CardsUI")
         if not spot:
             game.wait(1)
             continue
-        game.click(*spot)
+        game.click(spot[0], spot[1])
         game.park_mouse()
         game.wait(1.2)
         if menu_open(game):
@@ -60,11 +71,10 @@ def open_menu(game):
     return False
 
 
-def read_state(game, img=None):
+def read_state(game=None, img=None):
     """What the Rebirth menu says, as a dict (any missing field is None):
     rebirths, luck_now, luck_after, cost (text, e.g. '73.2B'), cost_value."""
-    words, _ = _menu_words(game, img)
-    text = fix_numbers(" ".join(t for t, _, _ in words))
+    text = " ".join(t for t, _ in _texts(_panel()))
     state = {"rebirths": None, "luck_now": None, "luck_after": None, "cost": None, "cost_value": None}
     m = re.search(r"Rebirths?:?\s*(\d[\d,]*)", text, re.I)
     if m:
@@ -101,19 +111,21 @@ def peek(game):
     return state
 
 
-def _button(game):
-    """The big REBIRTH button: the lowest all-capitals 'REBIRTH' in the menu."""
-    words, _ = _menu_words(game)
-    buttons = [(x, y) for t, x, y in words if t == "REBIRTH" or (t.upper() == t and t.startswith("REBIRT"))]
-    return max(buttons, key=lambda b: b[1]) if buttons else None
+def _button(game=None):
+    """The big REBIRTH button (whatever it says now: its text changes after the first click)."""
+    return next((b for t, b in mem_gui.buttons(_panel(), depth=4) if t and t != "X" and mem_gui.shown(b)), None)
 
 
-def _asks_to_confirm(game):
+def _asks_to_confirm(game=None):
     """After the first click the button's text changes to a confirm prompt (it reads
     "CLICK AGAIN TO CONFIRM"; "are you sure" is accepted too in case it's reworded)."""
-    words, _ = _menu_words(game)
-    text = " ".join(t for t, _, _ in words).lower()
+    text = " ".join(t for t, _ in _texts(_panel())).lower()
     return any(phrase in text for phrase in ("confirm", "click again", "are you sure", "you sure"))
+
+
+def _press(game, button):
+    if not mem_gui.click(game, button):
+        raise RuntimeError("the REBIRTH button has no place on the screen")
 
 
 ALLOW_BID_LOSS = True  # config.json "rebirth_forfeits_bids"
@@ -123,11 +135,15 @@ def _market_warning(game, wait=2.5):
     """With coins tied up in Market bids / requests, the second click opens a third screen:
     "Coins in the Market - You have 200.0B coins in Market bids / requests. If you rebirth,
     those coins are GONE ...", with REBIRTH ANYWAY and CANCEL. Returns None if it isn't
-    showing, else (button words, coins text e.g. '200.0B')."""
+    showing, else ([(text, object)] of what's showing, coins text e.g. '200.0B')."""
     end = time.time() + wait
     while time.time() < end:
-        words, _ = _menu_words(game)
-        text = fix_numbers(" ".join(t for t, _, _ in words))
+        root, g = mem_gui.cards_root(), mem_gui.gui()
+        words = []
+        for fr in (g.mb._children(root) if root is not None else []):  # (it may be its own menu, or in this one)
+            if g.is_shown(fr):
+                words += _texts(fr)
+        text = " ".join(t for t, _ in words)
         if "anyway" in text.lower() or ("coins" in text.lower() and "gone" in text.lower()):
             m = re.search(r"have\s*\W*\s*([\d.,]+\s*[KMBTQ]?)\s*coins in", text, re.I)
             return words, (m.group(1).replace(" ", "") if m else "?")
@@ -142,31 +158,12 @@ def _answer_market_warning(game, warning):
     saved = webstate.load("mode.json", {}).get("bid_anyway")  # the website's "Rebirth anyway" switch
     allow = saved if isinstance(saved, bool) else ALLOW_BID_LOSS
     webstate.save("bids_seen.json", {"coins": coins, "at": time.strftime("%H:%M:%S"), "went_ahead": allow})
-    spot = _warning_button(words, "anyway" if allow else "cancel")
-    if not spot:
+    which = "anyway" if allow else "cancel"
+    label = min(((len(t), o) for t, o in words if which in t.lower()), default=(0, None), key=lambda x: x[0])[1]
+    if label is None or not mem_gui.click(game, label):
         raise RuntimeError("the Market-bids warning is up but its buttons couldn't be found")
-    game.click(*spot)
-    game.park_mouse()
     game.wait(0.8)
     return coins if allow else None
-
-
-def _warning_button(words, which):
-    """Where to click REBIRTH ANYWAY ("anyway") or CANCEL ("cancel") on the warning. The
-    words are read by OCR, so the name is matched loosely, and if it isn't there at all the
-    other button's position is used (the two sit side by side, about 466 px apart at UI scale 1)."""
-    from difflib import SequenceMatcher
-
-    def find(name):
-        # (the two words of "REBIRTH ANYWAY" are often read as one: "'REBIRTHANYWAY")
-        best = max(((1.0 if name in t.lower() else SequenceMatcher(None, t.lower().strip("'\".!"), name).ratio(), x, y)
-                    for t, x, y in words), default=None)
-        return (best[1], best[2]) if best and best[0] >= 0.7 else None
-
-    anyway, cancel = find("anyway"), find("cancel")
-    if which == "anyway":
-        return anyway or (cancel[0] - 466, cancel[1]) if cancel or anyway else None
-    return cancel or (anyway[0] + 466, anyway[1]) if cancel or anyway else None
 
 
 def rebirth_once(game, dry_run=False):
@@ -183,8 +180,7 @@ def rebirth_once(game, dry_run=False):
         return False, "couldn't find the REBIRTH button"
     armed = False
     for attempt in range(3):
-        game.click(*button)  # first click: asks "are you SURE"
-        game.park_mouse()
+        _press(game, button)  # first click: asks "are you SURE"
         game.wait(0.7 if attempt == 0 else 1.0)
         armed = _asks_to_confirm(game)
         if armed:
@@ -203,19 +199,13 @@ def rebirth_once(game, dry_run=False):
                        f"prompt {'showed' if armed else 'did NOT show'}; stopped before the second click")
     lost = None
     if armed:
-        game.click(*button)  # second click (the button hasn't moved, only its text)
-        game.park_mouse()
+        _press(game, button)  # second click (the button hasn't moved, only its text)
         warning = _market_warning(game)  # third screen, only with active Market bids
         if warning:
             try:
                 lost = _answer_market_warning(game, warning)
             except RuntimeError as e:
-                try:
-                    import cv2
-                    cv2.imwrite(os.path.join(HERE, "rebirth_stuck.png"), game.frame())
-                except Exception:
-                    pass
-                return False, f"{e} (words seen: {' '.join(t for t, _, _ in warning[0])[:300]})"
+                return False, f"{e} (text showing: {' | '.join(t for t, _ in warning[0])[:300]})"
             if lost is None:
                 return False, (f"active Market bids ({warning[1]} coins) would be lost in a rebirth; "
                                "cancelled (turn on \"Rebirth anyway\" on the website to allow it)")
@@ -230,12 +220,9 @@ def rebirth_once(game, dry_run=False):
         if after["rebirths"] is not None and after["rebirths"] > before["rebirths"]:
             publish(after)
             return True, f"rebirth #{after['rebirths']} done for {before['cost']} (luck now x{after['luck_now']}){note}"
-    try:
-        import cv2
-        cv2.imwrite(os.path.join(HERE, "rebirth_stuck.png"), game.frame())  # to see what it got stuck on
-    except Exception:
-        pass
-    return False, "clicked REBIRTH but the rebirth count didn't go up (maybe another confirm window or not enough coins)"
+    seen = " | ".join(t for t, _ in _texts(_panel()))[:300]  # to see what it got stuck on
+    return False, ("clicked REBIRTH but the rebirth count didn't go up (maybe another confirm window or not enough "
+                   f"coins; the menu says: {seen})")
 
 
 def rebirth_many(game, count, budget=None, should_stop=lambda: False, dry_run=False, log=print):
@@ -302,7 +289,7 @@ def run_nightly(game, fraction=FRACTION, should_stop=lambda: False, dry_run=Fals
     if state.get("date") != today:
         close_popup(game)
         close_any_menu(game)
-        balance = read_balance(game, game.frame())
+        balance = read_balance()
         coins = amount_value(balance or "")
         if not coins:
             log("Nightly rebirth: couldn't read the coin balance; skipping tonight.")

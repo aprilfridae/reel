@@ -1,10 +1,10 @@
-"""Knowing which event is on, by reading the game's text with OCR.
+"""Knowing which event is on, from the game's memory.
 
-Top-right banner, two forms:
-  "VOLCANO ERUPTION 16:11 left • Volcano Packs dropping!"    (event running)
-  "Next: Blood Moon starts in 39:37"                         (waiting for the next one)
-Bottom-right auto-roll label:
-  "AUTO-ROLLING +2740 packs • last: Rainbow Pack"            (the pack just rolled)
+Top-right banner (EventHUD > Pill, two labels), two forms:
+  "☄ METEOR SHOWER" / "16:11 left • Meteor Packs dropping!"     (event running)
+  "Next: ☄ Meteor Shower" / "starts in 39:37"                    (waiting for the next one)
+Bottom-right auto-roll label (CardsUI > Root > AutoPill):
+  "AUTO-ROLLING" / "+2740 packs  •  last: Rainbow Pack"           (the pack just rolled)
 
 An event's pack is the one whose name is part of the event's name (Volcano Pack
 during VOLCANO ERUPTION, Blood Moon Pack during BLOOD MOON, ...), so new events
@@ -13,9 +13,9 @@ work without changes as long as that holds.
 import re
 import time
 
-from ocr import read_text
+import mem_gui
 
-# Pack names as they appear in text -> the bot's name for them (templates/pack_<name>.png)
+# Pack names as they appear in text -> the bot's name for them
 EVENT_PACK_NAMES = {
     "blood moon": "blood_moon",
     "eclipse": "eclipse",
@@ -57,46 +57,85 @@ def event_pack(event_name):
     return words[0] if words else None
 
 
+def _words(text):
+    return " ".join(w for w in re.findall(r"[A-Za-z]+", text) if len(w) > 1)
+
+
+def _labels(root, depth=4):
+    """The texts of the labels under root, in order (empty ones left out), or None if memory can't be read."""
+    g = mem_gui.gui()
+    if g is None or root is None:
+        return None
+    mb = g.mb
+    out = []
+    for d, o in mb._walk(root, depth=depth, max_nodes=80):
+        if mb._class_name(o) in ("TextLabel", "TextButton"):
+            t = (mb._content_text(o) or "").strip()
+            if t:
+                out.append(t)
+    return out
+
+
+def banner_text():
+    """The event banner's two lines as one ("Next: ☄ Meteor Shower starts in 39:37"), "" if it isn't showing, None if
+    memory can't be read."""
+    g = mem_gui.gui()
+    if g is None:
+        return None
+    sg = next((s for s in g.mb._children(g.mb.player_gui) if g.mb._name(s) == "EventHUD"), None)
+    if sg is None or not g.screen_on("EventHUD"):
+        return ""
+    texts = _labels(sg)
+    return " ".join(texts) if texts else ""
+
+
+def roll_text():
+    """The auto-roll label ("+2740 packs  •  last: Rainbow Pack"), None if it isn't showing."""
+    g = mem_gui.gui()
+    if g is None:
+        return None
+    mb = g.mb
+    cards = next((s for s in mb._children(mb.player_gui) if mb._name(s) == "CardsUI"), None)
+    root = cards and mb._find_child(cards, name="Root")
+    pill = root and mb._find_child(root, name="AutoPill")
+    if not pill or not g.is_shown(pill):
+        return None
+    return next((t for t in _labels(pill, 2) or [] if re.search(r"last\W", t, re.I)), None)
+
+
 class EventWatcher:
-    def __init__(self, game):
+    def __init__(self, game=None):
         self.game = game
         self.state = None  # "active", "next" or None (banner not read)
         self.name = ""  # event name, e.g. "VOLCANO ERUPTION" / "Blood Moon"
         self.seconds = None  # time left (active) or until start (next)
         self.read_at = 0.0
         self.last_pack = None  # pack named on the auto-roll label
-        self._label_pixels = None
-        self._deferred = []
+        self._label_text = None
+        self._deferred = set()
         self.raw = ""
 
     # ----- banner -----
-    def _banner_area(self, img):
-        h, w = img.shape[:2]
-        s = self.game.ui_scale(img)
-        # Only the banner itself: wider would take in the "Skip FREE" button beside it
-        return img[0:int(110 * s), max(0, w - int(470 * s)):w]
-
-    def update_banner(self, img, every=1.0):
-        """Re-read the banner at most every `every` seconds."""
+    def update_banner(self, img=None, every=1.0):
+        """Re-read the banner at most every `every` seconds. (img: unused, it's read from memory.)"""
         if time.time() - self.read_at < every:
             return
         self.read_at = time.time()
-        text = read_text(self._banner_area(img))
+        text = banner_text()
+        if text is None:
+            return  # (memory can't be read right now: the last reading stands)
         self.raw = text
         if re.search(r"\bleft\b", text, re.I):
             self.state = "active"
             # The event name is the run of capital words right before the time
-            # (other buttons next to the banner, like "Skip FREE", come before it)
             before = re.split(r"\d", text, maxsplit=1)[0]
             caps = re.findall(r"\b[A-Z]{3,}(?:\s+[A-Z]{2,})*\b", before)
-            self.name = caps[-1] if caps else before.strip(" •.-")
+            self.name = caps[-1] if caps else _words(before)
             self.seconds = _time_to_seconds(text)
         elif re.search(r"starts\s+in", text, re.I):
             self.state = "next"
             name = re.split(r"starts\s+in", text, flags=re.I)[0]
-            name = re.split(r"\bNext\b", name, flags=re.I)[-1]
-            # Drop the event's icon, which OCR reads as a stray letter or symbol
-            self.name = " ".join(w for w in re.findall(r"[A-Za-z]+", name) if len(w) > 1)
+            self.name = _words(re.split(r"\bNext\b", name, flags=re.I)[-1])  # (its icon, an emoji, left out)
             self.seconds = _time_to_seconds(text.split("starts")[-1])
         else:
             self.state = None
@@ -111,28 +150,24 @@ class EventWatcher:
         return event_pack(self.name) if self.active else None
 
     # ----- auto-roll label -----
-    def update_label(self, img, defer=False):
-        """Re-read the 'last: X Pack' label, but only when its pixels changed.
-        Returns the pack key if it just changed to a new value, else None.
-        defer=True (during a reel): don't spend time on OCR now, just keep a copy of
-        the changed label; read_deferred() reads them afterwards."""
-        h, w = img.shape[:2]
-        s = self.game.ui_scale(img)
-        area = img[h - int(70 * s):h, w - int(340 * s):w]
-        small = area[::4, ::4]
-        if self._label_pixels is not None and small.shape == self._label_pixels.shape \
-                and abs(small.astype(int) - self._label_pixels).mean() < 2:
+    def update_label(self, img=None, defer=False):
+        """Re-read the 'last: X Pack' label (memory: a few small reads, so it's read even during a reel).
+        Returns the pack key if it just changed to a new value, else None. defer=True (during a reel): the change is
+        kept for read_deferred() instead."""
+        text = roll_text()
+        if not text or text == self._label_text:
             return None
-        self._label_pixels = small.astype(int)
+        self._label_text = text
+        key = self._read_label(text)
         if defer:
-            self._deferred.append(area.copy())
+            if key:
+                self._deferred.add(key)
             return None
-        return self._read_label(area)
+        return key
 
-    on_label = None  # called with (pack key, whole label text) each time the label is read: the website's roll count
+    on_label = None  # called with (pack key, whole label text) each time the label changes: the website's roll count
 
-    def _read_label(self, area):
-        text = read_text(area)
+    def _read_label(self, text):
         m = re.search(r"last\W+(.+?)\s+Pack", text, re.I)
         if not m:
             return None
@@ -147,10 +182,9 @@ class EventWatcher:
         return key if changed else None
 
     def read_deferred(self):
-        """Pack keys from labels saved during a reel."""
-        found = {self._read_label(a) for a in self._deferred}
-        self._deferred = []
-        return found - {None}
+        """Pack keys the label changed to during a reel."""
+        found, self._deferred = self._deferred, set()
+        return found
 
     def describe(self):
         if self.state == "active":
