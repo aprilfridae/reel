@@ -79,10 +79,15 @@ class MONITORINFO(ctypes.Structure):
 user32.MonitorFromWindow.restype = wt.HANDLE
 user32.MonitorFromWindow.argtypes = [wt.HWND, wt.DWORD]
 user32.GetMonitorInfoW.argtypes = [wt.HANDLE, ctypes.POINTER(MONITORINFO)]
+user32.GetWindowLongPtrW.restype = ctypes.c_ssize_t
+user32.GetWindowLongPtrW.argtypes = [wt.HWND, ctypes.c_int]
+GWL_STYLE, WS_CAPTION = -16, 0x00C00000
 
 
 def window_is_fullscreen(hwnd):
-    """True when the window covers its whole monitor (Roblox's F11 fullscreen), taskbar and all."""
+    """True when Roblox is in F11 fullscreen: no title bar, and the window covers its whole monitor."""
+    if not hwnd or user32.GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_CAPTION:
+        return False
     r = wt.RECT()
     user32.GetWindowRect(hwnd, ctypes.byref(r))
     mon = MONITORINFO(ctypes.sizeof(MONITORINFO))
@@ -168,8 +173,10 @@ class Game:
         bar, no taskbar strip). Roblox remembers the setting, so this usually finds it done.
         Returns True when the window fills the screen."""
         if window_is_fullscreen(self.hwnd):
+            log("Roblox is already fullscreen")
             return True
         for _ in range(2):
+            log("Pressing F11")
             self.focus()
             self.tap("f11", 0.06)
             end = time.time() + 4

@@ -19,7 +19,7 @@ import urllib.request
 from paths import APP, FROZEN
 from version import VERSION
 
-REPO = "aprilfridae/underground-rng-bot-memory"
+REPO = "aprilfridae/reel"
 ASSET = "UndergroundBot.exe"
 CHECK_EVERY = 1800  # seconds
 EXE = sys.executable

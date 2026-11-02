@@ -1,4 +1,4 @@
-"""The program people run (and what gets packaged into the .exe).
+"""reel. People run the packaged program (the file is still UndergroundBot.exe).
 
   UndergroundBot.exe              opens Roblox + the game if needed, then runs the bot, with
                                   the website on http://<this PC>:8080 for the home network
@@ -60,7 +60,7 @@ def main():
     from version import VERSION
     updater.wait_for_previous()  # just updated: the old copy must be gone (it holds the website's port)
     cfg = config.load()
-    print(f"UndergroundBot {VERSION} (memory-reading fork)", flush=True)
+    print(f"reel {VERSION}", flush=True)
     if cfg["website"]:
         start_website(cfg["website_port"])
     if cfg["auto_update"]:

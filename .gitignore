@@ -19,6 +19,7 @@ serial_glyphs/
 *.png
 !templates/*.png
 !web/static/logo.png
+!docs/*.png
 
 # development, kept on this PC only (the bot PC's login and SSH set-up)
 tools/botpc.txt

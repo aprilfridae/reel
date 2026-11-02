@@ -82,10 +82,12 @@ def main():
     if not launcher.ensure_running(CFG, log=lambda m: print(m, flush=True)):
         raise SystemExit("Roblox isn't open and couldn't be started.")
     game = Game()
+    if CFG["fullscreen"]:
+        game.ensure_fullscreen(log)  # as soon as the window is there, not after the game finishes loading
     if not was_open:
         launcher.wait_in_game(game, log=log)
-    if CFG["fullscreen"]:
-        game.ensure_fullscreen(log)
+        if CFG["fullscreen"]:
+            game.ensure_fullscreen(log)  # loading can put the window back; press F11 again if it did
     # (after the first reels, a one-line summary of how fishing runs on this PC goes to the console; nothing is sent anywhere)
     mb = None  # Roblox's memory, found once and shared with the fisher and the website's poller: everything is read there
     for attempt in range(10):

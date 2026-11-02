@@ -5,12 +5,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark">
 <meta name="theme-color" content="#090908">
-<title>fridaes pack bot</title>
+<title>reel (private)</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Doto:wght@500;700;900&family=Manrope:wght@400;500;600;700&family=Fredoka:wght@500;600;700&display=swap">
 <style>
-  /* fridaes pack bot: near-black, warm white, lowercase. hairlines, pixel titles, mono eyebrows. */
+  /* reel (private): near-black, warm white, lowercase. hairlines, pixel titles, mono eyebrows. */
   :root {
     color-scheme: dark;
     --bg: #090908; --panel: #121210; --line: #2a2a26; --fg: #ecebe6; --dim: #8a8984;
@@ -50,7 +50,8 @@
   .ring { width: 32px; height: 32px; border: 2px solid var(--fg); border-top-color: transparent; border-radius: 50%; }
   .spin { animation: spin 6s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
-  .brand-name { font: 700 20px/1.1 var(--f-title); letter-spacing: .02em; }
+  .brand-name { font: 700 15px/1.15 var(--f-title); letter-spacing: 0; white-space: nowrap; }
+  .brand-ver { margin-top: 3px; }
   .side nav { display: grid; gap: 4px; padding: var(--u) 12px; overflow-y: auto; }
   .side nav a { display: flex; align-items: center; gap: 12px; height: 40px; padding: 0 12px; border: 1px solid transparent;
                 border-radius: var(--r); color: var(--dim); font-weight: 500;
@@ -227,6 +228,7 @@
   .lightbox.on { display: grid; }
   .lightbox figure { display: grid; gap: 12px; justify-items: center; max-width: min(92vw, 560px); max-height: 94vh; cursor: zoom-out; }
   .lightbox img { max-width: 100%; max-height: 78vh; object-fit: contain; border: var(--hair); border-radius: var(--r); background: var(--bg); }
+  .lightbox #lb-card { width: min(86vw, 340px); }
   .lightbox figcaption { text-align: center; font-size: 13px; overflow-wrap: anywhere; }
   .lightbox .raw { display: block; margin-top: 6px; color: var(--dim); font: 500 11px/1.4 var(--f-mono); }
   .bid-row .thumb, .sell-row .thumb { width: 56px; height: 80px; object-position: top; flex: none; border: var(--hair); border-radius: 4px; background: var(--bg); object-fit: cover; }
@@ -280,14 +282,14 @@
   .pstats b { font: 700 22px/1 var(--f-title); margin-right: 6px; }
   .pstats .eyebrow { display: block; margin-bottom: 4px; }
   .plog { max-height: 420px; overflow-y: auto; }
-  .prow { display: grid; grid-template-columns: 64px 62px minmax(0, 1fr) auto; gap: 8px 12px; align-items: center; padding: 8px 0; border-top: var(--hair); font-size: 13px; }
+  .prow { display: grid; grid-template-columns: 64px 62px minmax(0, 1fr); gap: 8px 12px; align-items: center; padding: 8px 0; border-top: var(--hair); font-size: 13px; min-width: 0; }
   .prow .t { font: 500 11px/1 var(--f-mono); color: var(--dim); }
   .prow .k { font: 700 10px/16px var(--f-mono); letter-spacing: .06em; text-align: center; border: 1px solid var(--line); border-radius: 4px; }
   .prow.hit { background: color-mix(in srgb, var(--fg) 8%, transparent); }
   .prow.hit .k { border-color: var(--fg); }
   .prow .ones { font-weight: 700; }
-  .prow .pcards { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; max-width: 300px; }
-  .prow .pcards .rc.mini { width: 40px; height: 40px; flex: none; }
+  .prow .pcards { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 12px; min-width: 0; }
+  .prow .pcards .rc { width: 168px; cursor: zoom-in; }
   .lightbox figure:has(img[src*="/packs/"]) { max-width: min(96vw, 1100px); }
   .proll { display: flex; flex-wrap: wrap; gap: 6px 10px; color: var(--dim); font: 500 11px/1.4 var(--f-mono); }
   /* trade */
@@ -544,7 +546,7 @@
 <aside class="side" id="side">
   <div class="brand">
     <span class="logo-wrap"><img id="logo" alt="" hidden><span id="logo-fallback" class="ring spin"></span></span>
-    <div><div class="brand-name">fridaes</div><div class="eyebrow">pack bot</div></div>
+    <div class="brand-copy"><div class="brand-name">reel (private)</div><div class="eyebrow brand-ver" id="brand-version"></div></div>
     <button class="icon side-close" id="menu-close" aria-label="close menu"></button>
   </div>
   <nav id="nav" aria-label="sections">
@@ -561,7 +563,7 @@
 </aside>
 <div class="scrim" id="scrim"></div>
 <div class="outbids" aria-live="assertive"><div id="tradepop"></div><div id="outbids" style="display:contents"></div></div>
-<div class="lightbox" id="lightbox" role="dialog" aria-label="enlarged card"><figure><img id="lb-img" alt=""><figcaption id="lb-cap"></figcaption></figure></div>
+<div class="lightbox" id="lightbox" role="dialog" aria-label="enlarged card"><figure><img id="lb-img" alt=""><div id="lb-card" hidden></div><figcaption id="lb-cap"></figcaption></figure></div>
 
 <div class="main">
   <header class="top">
@@ -714,7 +716,7 @@ function rcard(c, opts = {}) {
   const art = artUrl(c) || (opts.guest ? GUEST : "");
   if (!art) return "";
   const r = String(c.rarity || "common").toLowerCase().replace(/[^a-z]/g, "") || "common";
-  const one = String(c.serial) === "1", g10 = String(c.grade) === "10";
+  const one = opts.glow !== false && String(c.serial) === "1", g10 = String(c.grade) === "10";
   const cls = `rc r-${r}${DARK.has(r) ? " dark" : ""}${opts.mini ? " mini" : ""}${one ? " one" : ""}${g10 ? " g10" : ""} ${opts.cls || ""}`;
   const img = `<img src="${art}" alt="${esc(c.name || "")}" loading="lazy">`;
   if (opts.mini) return `<span class="${cls}" ${opts.attrs || ""}>${img}</span>`;
@@ -778,7 +780,8 @@ function mineRowHtml(m, at) {
   const left = m.ends_ts ? `<b class="countdown" data-mine-ends="${esc(m.ends_ts)}">${esc(m.time_left)}</b>`
     : `<span class="done">${esc(m.time_left || "?")}</span>`;
   const cap = [m.name || "", m.serial ? "#" + m.serial : "", m.status || "", m.amount || "", m.time_left || ""].filter(Boolean).join(" · ");
-  const thumb = rcard(m, {mini: true, guest: true, cls: "thumb", attrs: `title="${esc(cap)}"`});
+  const thumb = rcard(m, {mini: true, guest: true, cls: "thumb", glow: m.status !== "winning",
+    attrs: `title="${esc(cap)}"`});
   const nm = m.name ? `<span class="cname">${esc(m.name)}</span>` : "";
   if (m.kind !== "bid") return `<div class="sell-row">
     ${thumb}
@@ -793,8 +796,18 @@ function mineRowHtml(m, at) {
 document.addEventListener("click", (e) => {
   const z = e.target.closest(".zoomable");
   if (z) {
-    $("lb-img").src = z.dataset.full;
-    $("lb-cap").innerHTML = `${esc(z.dataset.cap || "")}${z.dataset.raw ? `<span class="raw">read as: ${esc(z.dataset.raw)}</span>` : ""}`;
+    const cap = `${esc(z.dataset.cap || "")}${z.dataset.raw ? `<span class="raw">read as: ${esc(z.dataset.raw)}</span>` : ""}`;
+    if (z.dataset.card) {
+      $("lb-img").hidden = true;
+      $("lb-card").hidden = false;
+      $("lb-card").innerHTML = rcard(JSON.parse(z.dataset.card), {guest: true});
+    } else {
+      $("lb-card").hidden = true;
+      $("lb-card").innerHTML = "";
+      $("lb-img").hidden = false;
+      $("lb-img").src = z.dataset.full;
+    }
+    $("lb-cap").innerHTML = cap;
     $("lightbox").classList.add("on");
   } else if (e.target.closest("#lightbox")) {
     $("lightbox").classList.remove("on");
@@ -873,9 +886,11 @@ function renderPacks(s) {
   setHtml($("packs-roll"), kinds.map(([k, n]) => `<span>${esc(k.replace(/_/g, " "))} ${n}</span>`).join(""));
   setHtml($("packs-log"), log.length ? log.map(e => `<div class="prow"><span class="t">${esc(e.time)}</span><span class="k">${e.kind === "open" ? "opened" : "rolled"}</span>
       <span>${esc(e.pack)}${e.kind === "roll" && e.n > 1 ? ` ×${e.n}` : ""}</span>
-      ${e.cards && e.cards.length ? `<span class="pcards">${e.cards.map(c => rcard(c, {mini: true, guest: true,
-        attrs: `title="${esc([c.name, c.serial ? "#" + c.serial : "", (c.rarity || "").toLowerCase()].filter(Boolean).join(" · "))}"`})).join("")}</span>`
-      : "<span></span>"}</div>`).join("")
+      ${e.cards && e.cards.length ? `<span class="pcards">${e.cards.map(c => {
+        const cap = [c.name, c.serial ? "#" + c.serial : "", (c.rarity || "").toLowerCase()].filter(Boolean).join(" · ");
+        const data = {name: c.name, serial: c.serial, rarity: c.rarity, art: c.art, income: c.income, grade: c.grade, copy: c.copy};
+        return rcard(c, {guest: true, cls: "zoomable", attrs: `data-card="${esc(JSON.stringify(data))}" data-cap="${esc(cap)}" title="${esc(cap)}"`});
+      }).join("")}</span>` : ""}</div>`).join("")
     : `<div class="empty">nothing yet. packs the bot opens, and the rarer ones it rolls, show up here as they happen.</div>`);
 }
 
@@ -1366,6 +1381,7 @@ async function refresh() {
   if (s.now) clockOffset = s.now - Date.now() / 1000;
   // the bot was updated since this page was opened: load the new page (not while something is being typed)
   if (s.version) {
+    $("brand-version").textContent = s.version;
     pageVersion = pageVersion || s.version;
     const typing = document.activeElement && /^(INPUT|TEXTAREA)$/.test(document.activeElement.tagName) && document.activeElement.value;
     if (s.version !== pageVersion && !typing) { location.reload(); return; }
