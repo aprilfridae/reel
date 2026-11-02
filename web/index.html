@@ -698,12 +698,18 @@ function fmtLeft(secs) {
 // a card's own picture, from the game (the bot reads which picture each artist's card shows and downloads it once);
 // the bot's screenshot of the card is the fallback while it isn't known
 const artUrl = (c) => c && c.art ? `/static/art/${encodeURIComponent(c.art)}.png` : "";
+// a card whose picture Roblox won't give (or isn't known yet) shows a guest avatar instead, like a default profile picture
+const GUEST = "data:image/svg+xml," + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 144 115">
+  <defs><linearGradient id="b" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#d9dde3"/><stop offset="1" stop-color="#aab1bb"/></linearGradient></defs>
+  <rect width="144" height="115" fill="url(#b)"/><circle cx="72" cy="44" r="21" fill="#f4f6f9"/>
+  <path d="M30 115c0-25 19-41 42-41s42 16 42 41z" fill="#f4f6f9"/></svg>`);
 const RC_STARS = {common: 1, uncommon: 2, rare: 3, epic: 4, legendary: 5, mythic: 6, secret: 7};
 const DARK = new Set(["glitched", "radiation", "meteor", "eclipse", "blood"]);
 // a card drawn the way the game draws it, with its own picture from the game; "" when its picture isn't known.
-// opts.mini: just the art in its rarity's frame (thumbnails); opts.cls / opts.attrs: extra class / attributes
+// opts.mini: just the art in its rarity's frame (thumbnails); opts.guest: a guest avatar when the picture isn't known
+// (else ""); opts.cls / opts.attrs: extra class / attributes
 function rcard(c, opts = {}) {
-  const art = artUrl(c);
+  const art = artUrl(c) || (opts.guest ? GUEST : "");
   if (!art) return "";
   const r = String(c.rarity || "common").toLowerCase().replace(/[^a-z]/g, "") || "common";
   const one = String(c.serial) === "1", g10 = String(c.grade) === "10";
@@ -732,15 +738,7 @@ let cards = [];  // live listings; index i is what data-bid/data-buy/#amt<i> ref
 function cardHtml(c, i) {
   const price = c.top_bid || c.current_bid || c.start || "?";
   return `<article class="mcard">
-    ${(() => {  // the card as the game draws it when its picture is known (click: the bot's screenshot of it), else the screenshot
-      const shot = c.image ? `/static/cards/${esc(c.image)}?t=${esc(c.seen_at)}` : "";
-      const cap = esc([c.name || "", "#" + (c.serial || "?"), c.seller ? "seller " + c.seller : "", price].filter(Boolean).join(" · "));
-      const face = rcard(c, {cls: shot ? "zoomable" : "", attrs: shot ? `data-full="${shot}" data-cap="${cap}" title="click to see it in the game"` : ""});
-      if (face) return `<div class="mart rcw">${face}${c.pack ? `<span class="pack">${esc(c.pack)}</span>` : ""}</div>`;
-      return `<div class="mart">${shot ? `<img class="zoomable" src="${shot}" alt="" title="click to enlarge" data-full="${shot}" data-cap="${cap}">` : ""}
-        <span class="serial ${c.serial === "1" ? "one" : ""}">#${esc(c.serial)}</span>
-        ${c.pack ? `<span class="pack">${esc(c.pack)}</span>` : ""}</div>`;
-    })()}
+    <div class="mart rcw">${rcard(c, {guest: true})}${c.pack ? `<span class="pack">${esc(c.pack)}</span>` : ""}</div>
     <div class="mbody">
       ${c.name ? `<div class="cname"><b>${esc(c.name)}</b>${c.earnings ? ` <span class="eyebrow">${esc(c.earnings)}</span>` : ""}${c.grade ? ` <span class="grade">grade ${esc(c.grade)}</span>` : ""}</div>` : ""}
       <div class="mends"><span class="eyebrow">ends in</span>${c.ends_ts
@@ -778,10 +776,7 @@ function mineRowHtml(m, at) {
   const left = m.ends_ts ? `<b class="countdown" data-mine-ends="${esc(m.ends_ts)}">${esc(m.time_left)}</b>`
     : `<span class="done">${esc(m.time_left || "?")}</span>`;
   const cap = [m.name || "", m.serial ? "#" + m.serial : "", m.status || "", m.amount || "", m.time_left || ""].filter(Boolean).join(" · ");
-  const shot = m.image ? `/static/mine/${esc(m.image)}?t=${esc(at)}` : "";
-  const mini = rcard(m, {mini: true, cls: shot ? "thumb zoomable" : "thumb", attrs: shot ? `data-full="${shot}" data-cap="${esc(cap)}" title="click to enlarge"` : ""});
-  const thumb = mini || (shot ? `<img class="thumb zoomable" src="${shot}" alt="" title="click to enlarge"
-      data-full="${shot}" data-cap="${esc(cap)}" data-raw="${esc(m.raw || "")}">` : `<span class="thumb"></span>`);
+  const thumb = rcard(m, {mini: true, guest: true, cls: "thumb", attrs: `title="${esc(cap)}"`});
   const nm = m.name ? `<span class="cname">${esc(m.name)}</span>` : "";
   if (m.kind !== "bid") return `<div class="sell-row">
     ${thumb}

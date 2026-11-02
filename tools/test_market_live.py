@@ -33,8 +33,14 @@ print("bid window still open after the scan:", bool(mem_market.dialog_words()),
       "| listings in view:", [(c.get("name"), c.get("serial")) for c in mem_market.listings() or []], flush=True)
 with_bids = [c for c in cards if c.get("top_bidder")]
 print(f"listings with a top bidder read from the bid window: {len(with_bids)}", flush=True)
+import mybids  # noqa: E402
+t = time.time()
+info = mybids.read_my_bids(g, log=print)
+print(f"my bids in {time.time() - t:.1f} s:", info and {k: info[k] for k in ("winning", "selling", "requests", "amounts")}, flush=True)
+for i in (info or {}).get("items", []):
+    print("  ", {k: i.get(k) for k in ("kind", "status", "name", "serial", "rarity", "grade", "art", "amount", "time_left")}, flush=True)
 if cards:
-    want = {k: cards[0].get(k) for k in ("name", "serial", "seller", "start", "current_bid", "buy_now")}
+    want ={k: cards[0].get(k) for k in ("name", "serial", "seller", "start", "current_bid", "buy_now")}
     t = time.time()
     print("dry-run bid:", market_scan.place_bid(g, want, "1T", dry_run=True), f"({time.time() - t:.0f} s)", flush=True)
 print("buttons found:", mem_gui.stats, flush=True)

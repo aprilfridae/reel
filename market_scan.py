@@ -21,15 +21,12 @@ import mem_market
 from game import HERE, TEMPLATES
 from ocr import read_text, read_words
 
-CARDS_DIR = os.path.join(HERE, "web", "static", "cards")  # card pictures for the website
 COLUMN_PITCH = 190
 CARD_W = 190
 # Offsets from a card's BID button center (at UI scale 1)
 CARD_TOP = -390  # top of the card (its name line) above the BID button
 BADGE = (-357, -332, 30, 63)  # badge box: y0, y1 relative to BID; x0, x1 relative to card left
 TEXT_TOP = -140  # the price / time / seller lines
-CARD_BOTTOM_TOP = (-393, -146)  # the card itself (no price box), relative to BID
-CARD_HALF_W = 91
 
 
 def _columns(w, s):
@@ -252,7 +249,6 @@ def top_bidder(game, bid):
     game.park_mouse()
     words = text = None
     end = time.time() + 2.0
-    game.wait(0.2)
     while time.time() < end:
         words, text = _dialog_text(game)
         if re.search(r"Top\s*bid|Starting\s*bid", text, re.I):
@@ -400,9 +396,17 @@ def _to_top(game, mid):
     """Scroll the grid back to its top. The list grows with each "Show more" (a scan leaves it ~50 notches down), so
     one fixed scroll may not reach it: scroll until the listings in view stop changing (four scrolls if memory
     can't read them)."""
+    first = (mem_market.listings(shown_only=False) or [None])[0]  # (the list's first listing, wherever it is now)
+    if first:
+        for _ in range(8):
+            game.scroll(*mid, 30, check=False)  # (the market is open)
+            game.wait(0.25)
+            at = mem_market.where_is(first["_bid"])
+            if at and at[2]:
+                return
     before = None
     for i in range(8):
-        game.scroll(*mid, 30, check=False)  # (the market is open)
+        game.scroll(*mid, 30, check=False)
         game.wait(0.4)
         now = [(c.get("name"), c.get("serial")) for c in mem_market.listings() or []]
         if (now and now == before) or (not now and i >= 3):
@@ -415,7 +419,23 @@ def _find_once(game, want, strict=False, max_pages=60):
     """Go through the (lowest-serial sorted) market, pressing "Show more" as needed,
     for the listing the website asked about. Returns (bid_button, card) or (None, None).
     strict: don't stop early on cards that read as past #3 (go through all the pages)."""
+    import market
+    market.ensure_browse_tab(game)  # (My Bids may have left the market on another tab)
     set_sort_lowest_serial(game)
+    want = dict(want)
+    want.setdefault("price", _price(want))
+    grid_mid = _grid_mid(game)
+    cards = _load_all(game, grid_mid, lambda cs: any(_is_wanted(c, want) for c in cs)
+                      or sum(c.get("serial") not in WANTED_SERIALS for c in cs) >= STOP_AFTER * (3 if strict else 2))
+    if cards is not None:  # read from memory: scroll to it
+        card = next((c for c in cards if _is_wanted(c, want)), None)
+        at = _into_view(game, card, grid_mid, [100.0]) if card else None
+        if not at:
+            return None, None
+        card["bid"] = at
+        buy = mem_market.listings()  # (where its BUY button is, now it's in view)
+        card["buy"] = next((c.get("buy") for c in buy or [] if c.get("_bid") == card["_bid"]), card.get("buy"))
+        return (at[0], at[1], at[0]), card
     img = game.frame()
     h, w = img.shape[:2]
     mid = (w / 2, h * 0.55)
@@ -690,11 +710,121 @@ DEBUG_PAGES = os.environ.get("SCAN_DEBUG") == "1"
 STOP_AFTER = 12  # this many cards in a row past #3 (two full rows) = we're past them all
 
 
+def _finish(card):
+    """A listing as the website gets it."""
+    card["seen_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+    secs = left_seconds(card.get("time_left"))
+    if secs is not None:
+        card["ends_ts"] = time.time() + secs  # for the website's live countdown
+    for k in ("raw", "bid", "buy", "box", "cx", "auction_only", "_bid"):  # (only for finding it on screen)
+        card.pop(k, None)
+    return card
+
+
+def _needs_window(card):
+    """Is the bid window worth opening for this listing? Only for what the listing itself can't say: who the top
+    bidder is (a listing with a bid on it shows the bid, not who made it), or a start price that didn't read
+    whole. Fixes the start price in place."""
+    start, trusted = _fix_price(card.get("start"))
+    if start:
+        card["start"] = start
+    return "start" not in card or not trusted
+
+
+def _into_view(game, card, grid_mid, px_per_notch):
+    """Scroll until the listing's BID button is in the grid's window (worked out from where memory says it is, and
+    how far one notch of the wheel moved it last time). (x, y) of the button, or None."""
+    box = mem_market.grid_box()
+    for _ in range(8):
+        at = mem_market.where_is(card["_bid"])
+        if not at or not box:
+            return None
+        x, y, shown = at
+        if shown and box[0] + 40 < y < box[1] - 20:
+            return x, y
+        notches = int(round((y - (box[0] + box[1]) / 2) / px_per_notch[0])) or (1 if y > box[1] else -1)
+        game.scroll(*grid_mid, -max(-15, min(15, notches)), check=False)
+        game.wait(0.25)
+        after = mem_market.where_is(card["_bid"])
+        if after and after[1] != y and notches:
+            px_per_notch[0] = max(20.0, abs(y - after[1]) / abs(notches))  # (learnt: the wheel's step on this screen)
+    return None
+
+
+def _grid_mid(game):
+    img = game.frame()
+    h, w = img.shape[:2]
+    return w / 2, h * 0.55
+
+
+def _load_all(game, grid_mid, enough, should_stop=lambda: False):
+    """Every listing loaded, from memory, after pressing "Show more" until enough(listings) (or the end of the
+    list), top to bottom. None if memory can't read the market."""
+    memo = {}
+    _to_top(game, grid_mid)
+    cards = mem_market.listings(shown_only=False, memo=memo)
+    if not cards:
+        return None
+    for _ in range(20):
+        if enough(cards) or should_stop():
+            break
+        game.scroll(*grid_mid, -60, check=False)  # (to the bottom, where the button is)
+        game.wait(0.3)
+        more = mem_gui.locate(text="Show more", screen="MarketUI", exact=False) or _show_more(game.frame())
+        if not more:
+            break  # the end of the list
+        n = len(cards)
+        game.click(more[0], more[1])
+        game.park_mouse()
+        end = time.time() + 3.0
+        while time.time() < end:  # until the new listings are in
+            game.wait(0.15)
+            cards = mem_market.listings(shown_only=False, memo=memo) or cards
+            if len(cards) > n:
+                game.wait(0.3)  # (the rest of the batch)
+                cards = mem_market.listings(shown_only=False, memo=memo) or cards
+                break
+    return cards
+
+
+def _scan_memory(game, read_bidders, log, should_stop):
+    """scan() from memory: every listing loaded so far is in memory, shown or scrolled away, so instead of reading
+    page by page, "Show more" is pressed until the list goes past #3 and the whole list is read at once. Only a
+    listing whose top bidder is wanted is scrolled to (its bid window is opened). None if memory can't read it."""
+    grid_mid = _grid_mid(game)
+    t0 = time.time()
+    cards = _load_all(game, grid_mid, lambda cs: sum(c.get("serial") not in WANTED_SERIALS for c in cs) >= 6, should_stop)
+    if cards is None:
+        return None
+    t1 = time.time()
+    wanted = [c for c in cards if c.get("serial") in WANTED_SERIALS]
+    found, px = [], [100.0]
+    if read_bidders and any(_needs_window(c) for c in wanted):
+        _to_top(game, grid_mid)
+    for card in wanted:
+        if should_stop():
+            log("Market scan cut short for a bid/buy")
+            break
+        if read_bidders and _needs_window(card):
+            at = _into_view(game, card, grid_mid, px)
+            if at:
+                card.update(top_bidder(game, at))
+        elif "start" in card:
+            card["top_bidder"] = None
+        found.append(_finish(card))
+    log(f"Scanned {len(cards)} listing(s) from memory, {len(found)} #1-#3 "
+        f"(loading the list {t1 - t0:.0f} s, top bidders {time.time() - t1:.0f} s)")
+    return found
+
+
 def scan(game, read_bidders=True, max_pages=60, log=print, should_stop=lambda: False):
-    """List every #1, #2 and #3 listing. Sorted by lowest serial, so it scrolls down
-    until two full rows in a row are all past #3."""
+    """List every #1, #2 and #3 listing. Sorted by lowest serial: from memory (_scan_memory), else page by page
+    off the screen, scrolling down until two full rows in a row are all past #3."""
     if not set_sort_lowest_serial(game):
         log("Couldn't set the market sort to Lowest serial.")
+    found = _scan_memory(game, read_bidders, log, should_stop)
+    if found is not None:
+        return found
     img = game.frame()
     h, w = img.shape[:2]
     grid_mid = (w / 2, h * 0.55)
@@ -709,7 +839,6 @@ def scan(game, read_bidders=True, max_pages=60, log=print, should_stop=lambda: F
             log("Market scan cut short for a bid/buy")
             break
         img = game.frame()
-        s = game.ui_scale(img)
         if DEBUG_PAGES:
             cv2.imwrite(os.path.join(HERE, f"scan_page_{page:02d}.jpg"), cv2.resize(img, None, fx=0.5, fy=0.5))
         new = 0
@@ -730,37 +859,14 @@ def scan(game, read_bidders=True, max_pages=60, log=print, should_stop=lambda: F
                     break
                 continue
             past = 0
-            # a picture of just the card for the website (names in fancy fonts don't
-            # OCR well): from its top edge down to where the price box starts
-            cx = bid[2]
-            if card.get("box"):  # memory knows the card's edges
-                x0, y0, x1, y1 = (int(v) for v in card["box"])
-                thumb = img[max(0, y0):y1, max(0, x0):x1]
-            else:
-                thumb = img[max(0, int(bid[1] + CARD_BOTTOM_TOP[0] * s)):int(bid[1] + CARD_BOTTOM_TOP[1] * s),
-                            int(cx - CARD_HALF_W * s):int(cx + CARD_HALF_W * s)]
-            card["image"] = f"card_{len(found):03d}.jpg"
-            os.makedirs(CARDS_DIR, exist_ok=True)
-            # (twice the size, so it stays sharp when the website shows it enlarged)
-            cv2.imwrite(os.path.join(CARDS_DIR, card["image"]), cv2.resize(thumb, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC),
-                        [cv2.IMWRITE_JPEG_QUALITY, 88])
             # The bid window is only opened when it has something the listing can't give: who
             # the top bidder is (a listing with a bid on it), or a start price whose unit
             # couldn't be read. A listing with no bids just has "Start <price>" and no bidder
-            start, trusted = _fix_price(card.get("start"))
-            if start:
-                card["start"] = start
-            if read_bidders and ("start" not in card or not trusted):
+            if read_bidders and _needs_window(card):
                 card.update(top_bidder(game, bid))
             elif "start" in card:
                 card["top_bidder"] = None
-            card["seen_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
-            secs = left_seconds(card.get("time_left"))
-            if secs is not None:
-                card["ends_ts"] = time.time() + secs  # for the website's live countdown
-            for k in ("raw", "bid", "buy", "box", "cx", "auction_only"):  # (only for finding it on screen)
-                card.pop(k, None)
-            found.append(card)
+            found.append(_finish(card))
         if done:
             break
         # Only part of the market is loaded at a time; a "Show more (N)" button sits

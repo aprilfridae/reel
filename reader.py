@@ -111,7 +111,12 @@ class Reader:
             s = d.decode("utf-8")
         except UnicodeDecodeError:
             return None
-        return s if s.isprintable() else None
+        if s.isprintable():
+            return s
+        # names in fancy letters often carry invisible characters (zero-width joiners...): dropped, not the whole
+        # name; mostly unprintable bytes aren't text at all
+        clean = "".join(ch if ch.isprintable() else " " if ch.isspace() else "" for ch in s)  # (a line break: a space)
+        return clean if clean and len(clean) * 2 >= len(s) else None
 
     def _regions(self):
         MEM_COMMIT = 0x1000

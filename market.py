@@ -145,13 +145,15 @@ def ensure_browse_tab(game):
     scanning and bidding need Browse, so click it. The chat window, if it's up, covers the
     Browse tab and the first column of cards, so it's closed first."""
     chat.hide_window(game)
-    for _ in range(4):  # from memory: the Browse tab's chips show, and the tab is found by its name
-        if mem_gui.showing("MarketUI", text="Ultra"):
+    for _ in range(4):  # from memory: the Browse tab's chips show ("Rarities 93", "Ultra 1"), and the tab is found by its name
+        if mem_gui.locate(text="Rarities", screen="MarketUI", exact=False) and \
+                mem_gui.locate(text="Ultra", screen="MarketUI", exact=False):
             clear_search(game)
             return True
         tab = mem_gui.locate(text="Browse", screen="MarketUI", contains=True)
         if not tab:
             break
+        chat.hide_window(game)  # (the open chat window lies over the tab)
         game.click(tab[0], tab[1])
         game.park_mouse()
         game.wait(1.2)

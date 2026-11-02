@@ -56,7 +56,9 @@ def parse(texts):
     """A listing's fields from its texts (see the module doc)."""
     card = {"name": None, "serial": None, "rarity": None}
     top = min((t for t in texts if t[0] and not t[0].startswith("+") and not t[0].startswith("#")
-               and t[0].upper() not in RARITIES), key=lambda t: t[2], default=None)
+               and t[0].upper() not in RARITIES and not set(t[0]) <= set("★☆ ")
+               and not re.match(r"(Underground RNG|Earns)\b|GRADE$|\d{1,2}$", t[0], re.I)),  # (footer lines, the grade)
+              key=lambda t: t[2], default=None)
     if top:
         card["name"] = top[0]
     for t, x, y, parent, _ in texts:
@@ -122,9 +124,45 @@ def dialog_words():
         return None
 
 
-def listings():
-    """The listings in view (their BID button showing), read from memory; None if memory can't read the market
-    (the caller then reads the screen)."""
+def _entries(mb, grid, is_entry, memo=None):
+    """[(entry frame, its texts)] of the grid's tiles: the first frames down from the grid whose texts pass
+    is_entry (a tile isn't looked inside again). memo: {frame: texts} kept by the caller between reads, so the
+    tiles already read aren't read again (their positions in it are then out of date)."""
+    out, stack = [], [(1, c) for c in mb._children(grid)]
+    while stack:
+        d, node = stack.pop()
+        if memo is not None and node in memo:
+            out.append((node, memo[node]))
+            continue
+        if mb._class_name(node) != "Frame":
+            continue
+        texts = _texts(mb, node)
+        if memo is not None and is_entry(texts):
+            memo[node] = texts
+        if is_entry(texts):
+            out.append((node, texts))
+        elif d < 3 and texts:
+            stack.extend((d + 1, c) for c in mb._children(node))
+    return out
+
+
+def _card_of(mb, gui, entry, texts):
+    """A tile's card fields (parse()), plus its picture id ("art") and "box" (the card's edges on screen)."""
+    card = parse(texts)
+    box = gui.geom(next((o for dd, o in mb._walk(entry, depth=2, max_nodes=40) if mb._name(o) == "Card"), entry))
+    card["box"] = (box[0] - box[2] / 2, box[1] - box[3] / 2, box[0] + box[2] / 2, box[1] + box[3] / 2) if box else None
+    card["cx"] = box[0] if box else None
+    img = card_art._artwork(mb, entry)  # the card's own picture (the website shows it)
+    card["art"] = card_art.image_id(mb, img) if img else None
+    card_art.record(card.get("name"), card.get("rarity"), card["art"])
+    return card
+
+
+def listings(shown_only=True, memo=None):
+    """The Browse grid's listings, read from memory: those whose BID button is showing, or (shown_only=False) every
+    listing loaded so far, scrolled into view or not, top to bottom. Each also has "_bid": its BID label in memory
+    (where_is() says where it is now). memo: see _entries (then "bid" / "buy" / "box" may be out of date: use
+    where_is). None if memory can't read the market (the caller then reads the screen)."""
     gui = mem_gui.gui()
     if gui is None:
         return None
@@ -133,28 +171,86 @@ def listings():
         grid = _grid(mb)
         if grid is None:
             return None
-        out, seen = [], set()
-        for d, entry in mb._walk(grid, depth=3, max_nodes=2000):
-            if d == 0 or mb._class_name(entry) != "Frame":
-                continue
-            texts = _texts(mb, entry)
-            bid = next((t for t in texts if t[0].upper() == "BID"), None)
-            if bid is None or bid[4] in seen:
-                continue  # (a frame inside a listing: the listing itself was taken already)
-            seen.add(bid[4])
-            if not gui.is_shown(bid[4]):
+        out = []
+        for entry, texts in _entries(mb, grid, lambda ts: any(t[0].upper() == "BID" for t in ts), memo):
+            bid = next(t for t in texts if t[0].upper() == "BID")
+            if shown_only and not gui.is_shown(bid[4]):
                 continue  # scrolled out of view: read when it's in view (its BID must be clickable)
-            card = parse(texts)
+            if memo is not None and ("card", entry) in memo:
+                out.append(dict(memo[("card", entry)]))
+                continue
+            card = _card_of(mb, gui, entry, texts)
             buy = next((t for t in texts if t[0].upper() == "BUY"), None)
-            box = gui.geom(next((o for dd, o in mb._walk(entry, depth=2, max_nodes=40) if mb._name(o) == "Card"), entry))
             card["bid"] = (bid[1], bid[2])
             card["buy"] = (buy[1], buy[2]) if buy else None
-            card["box"] = (box[0] - box[2] / 2, box[1] - box[3] / 2, box[0] + box[2] / 2, box[1] + box[3] / 2) if box else None
-            card["cx"] = box[0] if box else bid[1]
-            img = card_art._artwork(mb, entry)  # the card's own picture (the website shows it)
-            card["art"] = card_art.image_id(mb, img) if img else None
-            card_art.record(card.get("name"), card.get("rarity"), card["art"])
+            card["cx"] = card["cx"] or bid[1]
+            card["_bid"] = bid[4]
+            if memo is not None:
+                memo[("card", entry)] = dict(card)
             out.append(card)
+        if memo is not None:  # (the positions read before a scroll are out of date: where the buttons are now)
+            for c in out:
+                g = gui.geom(c["_bid"])
+                if g:
+                    c["bid"] = (g[0], g[1])
+        out.sort(key=lambda c: (round(c["bid"][1] / 20), c["bid"][0]))
         return out
+    except Exception:
+        return None
+
+
+def where_is(obj):
+    """(x, y, shown?) of an object now (a BID label after scrolling), or None."""
+    gui = mem_gui.gui()
+    try:
+        g = gui.geom(obj)
+        return (g[0], g[1], gui.is_shown(obj)) if g else None
+    except Exception:
+        return None
+
+
+def grid_box():
+    """(top, bottom) of the showing grid on screen, or None."""
+    gui = mem_gui.gui()
+    try:
+        g = gui.geom(_grid(gui.mb))
+        return (g[1] - g[3] / 2, g[1] + g[3] / 2) if g else None
+    except Exception:
+        return None
+
+
+def header():
+    """The summary line under the market's tabs ("Selling 0/6 · Winning 1 · ...", "116 requests ... yours: 0/6 ..."),
+    or None."""
+    hit = mem_gui.read(text="Selling", screen="MarketUI", contains=True) or \
+        mem_gui.read(text="yours:", screen="MarketUI", contains=True)
+    return hit[0] if hit else None
+
+
+def my_listings():
+    """The My Listings tiles in memory: [{kind, status, name, serial, rarity, grade, art, amount, time_left}], kind
+    "bid" (an auction you bid on: status winning / outbid) or "listing" (your own). None if memory can't read it."""
+    gui = mem_gui.gui()
+    if gui is None:
+        return None
+    try:
+        mb = gui.mb
+        grid = _grid(mb)
+        if grid is None:
+            return None
+        items = []
+        for entry, texts in _entries(mb, grid, lambda ts: any(re.search(r"\bleft$", t[0]) for t in ts)
+                                     and any(t[3] == "FirstTen" for t in ts)):
+            card = _card_of(mb, gui, entry, texts)
+            low = " ".join(t[0] for t in texts).lower()
+            status = "winning" if "winning" in low else "outbid" if "outbid" in low else ""
+            amount = card.get("current_bid") or card.get("start") or card.get("buy_now")
+            items.append({"kind": "bid" if status else "listing", "status": status, "name": card.get("name"),
+                          "serial": card.get("serial"), "rarity": card.get("rarity"), "grade": card.get("grade"),
+                          "art": card.get("art"), "income": card.get("income"), "copy": card.get("copy"),
+                          "amount": amount, "time_left": card.get("time_left"), "y": card["box"][1] if card["box"] else 0,
+                          "x": card["cx"] or 0})
+        items.sort(key=lambda i: (round(i.pop("y") / 20), i.pop("x")))
+        return items
     except Exception:
         return None

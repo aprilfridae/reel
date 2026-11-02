@@ -227,7 +227,7 @@ def hide_window(game):
     open chat covers part of the Card Market). Clicking the chat button switches chat off
     until it's clicked again (restore_window does that)."""
     global _hidden_by_us
-    if _hidden_by_us or not chat_enabled(game):
+    if not chat_enabled(game):  # (looked at each time, not remembered: chat can come back on while the market is open)
         return False
     s = game.ui_scale(game.frame())
     for _ in range(2):
