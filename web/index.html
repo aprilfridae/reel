@@ -445,7 +445,26 @@
         container-type: inline-size; position: relative; display: block; width: 100%; aspect-ratio: 176 / 246; font-family: "Fredoka", var(--f-body);
         letter-spacing: normal; text-align: left; min-width: 0; }
   .rc, .rc * { text-transform: none; }  /* (the page is lowercase; the cards keep the game's own lettering) */
-  .rc-f { height: 100%; padding: 3.4cqw; border-radius: 6cqw; background: var(--f); box-shadow: 0 2px 10px rgba(0, 0, 0, .35); }
+  .rc-f { position: relative; height: 100%; padding: 3.4cqw; border-radius: 6cqw; background: var(--f); box-shadow: 0 2px 10px rgba(0, 0, 0, .35);
+          overflow: hidden; }
+  /* the shine: a band of light that sweeps across the card now and then, as on the game's cards */
+  .rc-f::after { content: ""; position: absolute; inset: 0; pointer-events: none; border-radius: inherit; mix-blend-mode: soft-light;
+                 background: linear-gradient(115deg, transparent 35%, rgba(255, 255, 255, .85) 48%, rgba(255, 255, 255, .2) 54%, transparent 62%)
+                 -150% 0 / 250% 100% no-repeat; }
+  /* sparkles: small white squares that twinkle over the art (gold ones all over a grade 10 card) */
+  .rc-sp { position: absolute; z-index: 2; width: 3cqw; height: 3cqw; background: #fff; pointer-events: none; opacity: .0;
+           transform: rotate(45deg) scale(.4); box-shadow: 0 0 2.4cqw 0.6cqw rgba(255, 255, 255, .7); }
+  .rc-sp.g { width: 3.6cqw; height: 3.6cqw; background: #fff6c8; box-shadow: 0 0 3cqw 1cqw rgba(255, 210, 90, .9); }
+  .rc-gr { position: absolute; top: 4cqw; right: 4cqw; display: grid; justify-items: center; padding: .4cqw 2.4cqw .8cqw; border-radius: 2.4cqw;
+           background: linear-gradient(180deg, #fffdf3, #f3e3b4); color: #6a4a00; box-shadow: 0 0 0 .8cqw #fff8; line-height: 1; }
+  .rc-gr small { font-size: 3.6cqw; font-weight: 700; letter-spacing: .06em; }
+  .rc-gr b { font-size: 8.6cqw; font-weight: 700; color: #3a2600; }
+  .rc.g10 .rc-gr { background: linear-gradient(180deg, #fff6c2, #ffcf4a); box-shadow: 0 0 0 .8cqw #fff8, 0 0 4cqw #ffd65a; }
+  /* a #1: a rainbow glow around the whole card */
+  .rc.one { isolation: isolate; }
+  .rc.one::before { content: ""; position: absolute; inset: -3.4cqw; z-index: -1; border-radius: 9cqw; filter: blur(3.4cqw); opacity: 1;
+                    background: conic-gradient(from 0deg, #ff4d8d, #ffb84d, #fff35c, #5cff9d, #4dc3ff, #9b6bff, #ff4d8d); }
+  .rc.mini.one { box-shadow: 0 0 0 2px #fff, 0 0 10px 2px #ffd45c, 0 0 16px 4px #ff6bd5; }
   .rc-in { height: 100%; display: flex; flex-direction: column; gap: 2.6cqw; padding: 3.2cqw 4.4cqw 3cqw; border-radius: 4cqw; background: var(--body); overflow: hidden; }
   .rc-top { display: flex; justify-content: space-between; align-items: baseline; gap: 2cqw; line-height: 1; }
   .rc-top b { font-weight: 700; font-size: 8.6cqw; color: var(--name); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -496,6 +515,16 @@
     .r-secret .rc-f, .r-glitched .rc-f, .r-eclipse .rc-f, .rc.mini.r-secret, .rc.mini.r-glitched, .rc.mini.r-eclipse { background-size: 220% 220%; animation: rc-shift 6s ease-in-out infinite alternate; }
   }
   @keyframes rc-shift { from { background-position: 0% 0%; } to { background-position: 100% 100%; } }
+  @media (prefers-reduced-motion: no-preference) {
+    .rc-f::after { animation: rc-shine 5.5s ease-in-out infinite; animation-delay: var(--d, 0s); }
+    .rc-sp { animation: rc-twinkle 2.6s ease-in-out infinite; animation-delay: var(--sd, 0s); }
+    .rc.one::before { animation: rc-glow 4s linear infinite; }
+    .rc.g10 .rc-f::after { animation-duration: 3s; }
+  }
+  @media (prefers-reduced-motion: reduce) { .rc-sp { opacity: .7; } }
+  @keyframes rc-shine { 0%, 55% { background-position: 150% 0; } 100% { background-position: -150% 0; } }
+  @keyframes rc-twinkle { 0%, 100% { opacity: 0; transform: rotate(45deg) scale(.3); } 50% { opacity: 1; transform: rotate(45deg) scale(1); } }
+  @keyframes rc-glow { from { filter: blur(3.4cqw) hue-rotate(0deg); } to { filter: blur(3.4cqw) hue-rotate(360deg); } }
   /* where it's used */
   .mart.rcw { aspect-ratio: auto; padding: 18px 18px 16px; }
   .mart.rcw .rc { width: min(100%, 230px); }
@@ -677,14 +706,22 @@ function rcard(c, opts = {}) {
   const art = artUrl(c);
   if (!art) return "";
   const r = String(c.rarity || "common").toLowerCase().replace(/[^a-z]/g, "") || "common";
-  const cls = `rc r-${r}${DARK.has(r) ? " dark" : ""}${opts.mini ? " mini" : ""} ${opts.cls || ""}`;
+  const one = String(c.serial) === "1", g10 = String(c.grade) === "10";
+  const cls = `rc r-${r}${DARK.has(r) ? " dark" : ""}${opts.mini ? " mini" : ""}${one ? " one" : ""}${g10 ? " g10" : ""} ${opts.cls || ""}`;
   const img = `<img src="${art}" alt="${esc(c.name || "")}" loading="lazy">`;
   if (opts.mini) return `<span class="${cls}" ${opts.attrs || ""}>${img}</span>`;
   const inc = c.income || (String(c.earnings || "").match(/[\d.,]+[KMBTQ]?/i) || [""])[0];
-  const sn = c.serial ? `<span class="rc-sn ${String(c.serial) === "1" ? "n1" : ""}">#${esc(c.serial)}</span>` : "";
-  return `<div class="${cls}" ${opts.attrs || ""}><div class="rc-f"><div class="rc-in">
+  const sn = c.serial ? `<span class="rc-sn ${one ? "n1" : ""}">#${esc(c.serial)}</span>` : "";
+  const gr = c.grade ? `<span class="rc-gr"><small>GRADE</small><b>${esc(c.grade)}</b></span>` : "";
+  // sparkles at spots that stay put for a card (from its name), so they don't jump around when the list redraws
+  let h = 0;
+  for (const ch of `${c.name}|${c.serial}`) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  const rnd = () => (h = (h * 1103515245 + 12345) >>> 0) / 4294967296;
+  const sp = (n, g, box) => Array.from({length: n}, () =>
+    `<i class="rc-sp${g ? " g" : ""}" style="left:${(box[0] + rnd() * box[2]).toFixed(1)}%;top:${(box[1] + rnd() * box[3]).toFixed(1)}%;--sd:${(rnd() * 2.6).toFixed(2)}s"></i>`).join("");
+  return `<div class="${cls}" ${opts.attrs || ""} style="--d:${(rnd() * 5).toFixed(2)}s"><div class="rc-f">${g10 ? sp(10, true, [4, 3, 88, 92]) : ""}<div class="rc-in">
     <div class="rc-top"><b>${esc(c.name || "?")}</b>${inc ? `<span>+${esc(inc)}/s</span>` : ""}</div>
-    <div class="rc-art">${img}${sn}</div>
+    <div class="rc-art">${img}${sn}${gr}${sp(4, false, [8, 10, 80, 76])}</div>
     <div class="rc-bar"><i>${"★".repeat(RC_STARS[r] || 8)}</i><span>${esc(r.toUpperCase())}</span></div>
     <div class="rc-panel">${inc ? `Earns +${esc(inc)} coins/s` : esc(c.name || "")}</div>
     <div class="rc-foot"><span>Underground RNG</span><span>${c.copy ? "#" + esc(c.copy) : ""}</span></div>

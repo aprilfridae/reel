@@ -9,7 +9,7 @@ build_tmp/
 *.zip
 # everything the bot writes while running
 web/data/
-web/static/
+web/static/*
 rebirth_state.json
 pack_session_done.txt
 daily_spin_done.txt
@@ -18,6 +18,7 @@ number1s/
 serial_glyphs/
 *.png
 !templates/*.png
+!web/static/logo.png
 
 # development, kept on this PC only (the bot PC's login and SSH set-up)
 tools/botpc.txt

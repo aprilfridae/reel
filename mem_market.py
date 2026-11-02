@@ -81,6 +81,12 @@ def parse(texts):
             card["seller"] = m.group(1).strip()
         elif s != t.strip() and re.fullmatch(_AMT, s) and "start" not in card:
             card["current_bid"] = s.replace(" ", "")  # an icon and an amount: the bid on it so far
+    # a graded card has a "GRADE" label over its grade ("10") at the art's top right: the closest number under it
+    label = next((t for t in texts if t[0].strip().upper() == "GRADE"), None)
+    if label:
+        nums = [t for t in texts if re.fullmatch(r"\d{1,2}", t[0].strip()) and abs(t[1] - label[1]) < 40 and 0 < t[2] - label[2] < 40]
+        if nums:
+            card["grade"] = min(nums, key=lambda t: t[2] - label[2])[0].strip()
     card["has_buy"] = "buy_now" in card
     return card
 
