@@ -13,6 +13,7 @@ import time
 import cv2
 
 import chat
+import mem_gui
 from game import HERE
 from ocr import read_words
 from packs import close_any_menu, close_popup, teleport
@@ -38,7 +39,9 @@ def prompt_position(img, game=None):
 
 
 def market_open(img):
-    """True if the Card Market window is showing."""
+    """True if the Card Market window is showing (memory's yes is trusted; a no is checked on screen)."""
+    if mem_gui.showing("MarketUI", text="Card Market"):
+        return True
     h, w = img.shape[:2]
     text = " ".join(t for t, _, _ in read_words(img[int(h * 0.1):int(h * 0.45), int(w * 0.15):int(w * 0.85)],
                                                 scale=2)).lower()
@@ -98,11 +101,17 @@ def clear_search(game, log=print):
     img = game.frame()
     s = game.ui_scale(img)
     h, w = img.shape[:2]
-    cx, cy = w / 2 + 323 * s, h / 2 - 294 * s
-    box = img[int(cy - 16 * s):int(cy + 16 * s), int(cx - 95 * s):int(cx + 95 * s)]
-    text = " ".join(read_text(box, scale=3).split()) if box.size else ""
-    if not text or text.lower().startswith("search"):
-        return False
+    mem = _search_box_mem(h)  # (what's in it, x, y), read from memory
+    if mem is not None:
+        text, cx, cy = mem
+        if not text.strip():
+            return False
+    else:
+        cx, cy = w / 2 + 323 * s, h / 2 - 294 * s
+        box = img[int(cy - 16 * s):int(cy + 16 * s), int(cx - 95 * s):int(cx + 95 * s)]
+        text = " ".join(read_text(box, scale=3).split()) if box.size else ""
+        if not text or text.lower().startswith("search"):
+            return False
     log(f"Market: clearing the search box ('{text}')")
     game.click(cx, cy)
     game.wait(0.3)
@@ -112,11 +121,40 @@ def clear_search(game, log=print):
     return True
 
 
+def _search_box_mem(h):
+    """The market's search box from memory: (its text, x, y), the showing text box in the top band of the market
+    window; None if memory can't tell."""
+    g = mem_gui.gui()
+    if g is None or not g.screen_on("MarketUI"):
+        return None
+    try:
+        mb = g.mb
+        sg = next(s for s in mb._children(mb.player_gui) if mb._name(s) == "MarketUI")
+        for d, o in mb._walk(sg, depth=6, max_nodes=400):
+            if mb._class_name(o) == "TextBox":
+                geo = g._ok(o)
+                if geo and geo[1] < h * 0.3:
+                    return mb._content_text(o) or "", geo[0], geo[1]
+    except Exception:
+        pass
+    return None
+
+
 def ensure_browse_tab(game):
     """The market opens on whichever tab was used last (My Listings, Requests...), but
     scanning and bidding need Browse, so click it. The chat window, if it's up, covers the
     Browse tab and the first column of cards, so it's closed first."""
     chat.hide_window(game)
+    for _ in range(4):  # from memory: the Browse tab's chips show, and the tab is found by its name
+        if mem_gui.showing("MarketUI", text="Ultra"):
+            clear_search(game)
+            return True
+        tab = mem_gui.locate(text="Browse", screen="MarketUI", contains=True)
+        if not tab:
+            break
+        game.click(tab[0], tab[1])
+        game.park_mouse()
+        game.wait(1.2)
     for _ in range(4):
         img = game.frame()
         words = read_words(img, scale=2)

@@ -26,6 +26,7 @@ import cv2
 import balance  # still available (for the .exe build)
 from memory_backend import get_backend  # the shared memory reader (balance, catches, fishing)
 from mem_reel import MemReel
+import mem_gui
 import chat
 import cleanup
 import gifts
@@ -541,9 +542,12 @@ def main():
     rb["wanted"] = (CFG["nightly_rebirth"] and packs_done_today and rebirth.nightly_wanted()
                     and tz.now().hour < PACK_SESSION_LATEST)
 
-    tidy = {"at": 0.0}
+    tidy = {"at": 0.0, "seen": 0.0, "stats": {}}
 
     def one_round():
+        if time.time() - tidy["seen"] > 1800 and mem_gui.stats != tidy["stats"]:  # how buttons were found lately
+            tidy["seen"], tidy["stats"] = time.time(), dict(mem_gui.stats)
+            log("Buttons found: {memory} from memory, {screen} on screen ({missing} looks with nothing there)".format(**mem_gui.stats))
         if time.time() - tidy["at"] > 6 * 3600:  # old pictures off the disk: at start-up, then every 6 hours
             tidy["at"] = time.time()
             try:

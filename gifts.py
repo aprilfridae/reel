@@ -4,13 +4,14 @@ Left side: the rainbow "CLAIM GIFT!" button opens Playtime Gifts, where each rea
 tier has a green "CLAIM!" button. If the button only shows a timer, nothing is ready.
 Right side: the "Daily" button opens the spin wheel (or, once today's is used, the Daily
 Spin box with "NEXT SPIN IN hh:mm:ss"); a new spin unlocks at 16:00 local time each day.
-Everything is found by reading the screen's text (OCR), so positions don't matter.
+The buttons are found in memory (mem_gui) by their text or name, else by reading the screen's text (OCR).
 """
 import os
 import re
 import time
 from datetime import datetime, timedelta
 
+import mem_gui
 from game import HERE
 from ocr import read_words
 from packs import close_any_menu, close_popup
@@ -36,7 +37,11 @@ MIDDLE = (0.15, 0.15, 0.85, 0.85)
 
 
 def gift_ready(game, img):
-    """Position of the CLAIM GIFT button if it says a gift is ready, else None."""
+    """Position of the CLAIM GIFT button if it says a gift is ready, else None (memory first, then the screen)."""
+    mem = mem_gui.locate(text="claim", screen="CardsUI", exact=False)
+    if mem and mem[0] < img.shape[1] * 0.2:  # (the left column)
+        mem_gui.stats["memory"] += 1
+        return mem[0], mem[1]
     words = _words(game, img, LEFT_BUTTONS)
     for t, x, y in words:
         if t.upper().startswith("CLAIM"):
@@ -57,10 +62,12 @@ def claim_gifts(game, log=print):
     claimed = 0
     for _ in range(12):
         img = game.frame()
-        buttons = [(x, y) for t, x, y in _words(game, img, MIDDLE)
-                   if re.fullmatch(r"claim!?", t.strip().lower())]  # not "Claimed"
+        mem = mem_gui.locate(text="CLAIM!", screen="GiftUI") or mem_gui.locate(text="CLAIM", screen="GiftUI")
+        buttons = [(mem[0], mem[1])] if mem else [
+            (x, y) for t, x, y in _words(game, img, MIDDLE) if re.fullmatch(r"claim!?", t.strip().lower())]  # not "Claimed"
         if not buttons:
             break
+        mem_gui.stats["memory" if mem else "screen"] += 1
         game.click(*buttons[0])
         game.park_mouse()
         claimed += 1
@@ -126,7 +133,9 @@ def daily_spin(game, log=print):
     if any(_TIMER.fullmatch(t) and abs(y - daily[0][1]) < 60 for t, x, y in words):
         _mark_spin_done()  # a countdown under "Daily": already spun
         return False
-    game.click(*daily[0])
+    mem = mem_gui.locate(name="DailyBtn", screen="CardsUI")
+    mem_gui.stats["memory" if mem else "screen"] += 1
+    game.click(*((mem[0], mem[1]) if mem else daily[0]))
     game.park_mouse()
     text = ""
     for _ in range(5):

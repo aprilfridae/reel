@@ -15,7 +15,7 @@ from game import WindowCapture, find_roblox  # noqa: E402
 from mem_reel import MemReel  # noqa: E402
 from vision import detect  # noqa: E402
 
-secs = float(sys.argv[1]) if len(sys.argv) > 1 else 150
+secs = float(sys.argv[1]) if len(sys.argv) > 1 else 100
 cap = WindowCapture(find_roblox(), fast=False)
 cap.from_screen = True
 mb = memory_backend.MemoryBackend(cache_path="explore_cache.json")
@@ -36,8 +36,8 @@ while time.time() < end:
     d = detect(img, 1.0)
     rows = []
     for k in names:
-        b = mb.r.read(objs[k], 0x400) or b""
-        rows.append(np.frombuffer(b.ljust(0x400, b"\0")[:0x400], np.uint8))
+        b = mb.r.read(objs[k], 0x700) or b""
+        rows.append(np.frombuffer(b.ljust(0x700, b"\0")[:0x700], np.uint8))
     raw.append(np.stack(rows))
     busy.append(d["busy"])
     reeling.append(d["zone"] is not None)
@@ -50,7 +50,7 @@ for label, y in (("panel up", busy), ("reeling", reeling)):
         continue
     hits = []
     for o, k in enumerate(names):
-        for off in range(0x400):
+        for off in range(0x700):
             v = raw[:, o, off]
             a, b = set(np.unique(v[y]).tolist()), set(np.unique(v[~y]).tolist())
             if not (a & b) and len(a) <= 2 and len(b) <= 2:

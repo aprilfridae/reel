@@ -9,6 +9,8 @@ import re
 import time
 from difflib import SequenceMatcher
 
+import market
+import mem_gui
 import webstate
 from market_scan import fix_numbers
 from ocr import read_words
@@ -48,7 +50,9 @@ def open_tab(game):
     """Click the "Who owns?" tab (found by name, else where it always is)."""
     img = game.frame()
     h = img.shape[0]
-    spot = next(((x, y) for t, x, y in read_words(img, scale=2) if t.lower().startswith("owns") and y < h * 0.3), None)
+    mem = mem_gui.locate(text="Who owns", screen="MarketUI", contains=True)
+    spot = mem_gui.either(mem and (mem[0], mem[1]), lambda: next(
+        ((x, y) for t, x, y in read_words(img, scale=2) if t.lower().startswith("owns") and y < h * 0.3), None))
     game.click(*(spot or _at(game, img, TAB)))
     game.park_mouse()
     game.wait(1.2)
@@ -57,7 +61,8 @@ def open_tab(game):
 def _search(game, artist):
     """Type the artist into the search box and open the best match. Returns (ok, message)."""
     img = game.frame()
-    game.click(*_at(game, img, SEARCH_BOX))
+    box = market._search_box_mem(img.shape[0])  # (the same box Browse uses, found in memory)
+    game.click(*(box[1:] if box else _at(game, img, SEARCH_BOX)))
     game.wait(0.3)
     clear_field()
     type_text(artist)
@@ -71,7 +76,11 @@ def _search(game, artist):
     img = game.frame()
     h, w = img.shape[:2]
     s = game.ui_scale(img)
-    if n <= 1:
+    tile = mem_gui.locate(text=artist, screen="MarketUI")  # the artist's tile, by its exact name, from memory
+    if tile:
+        mem_gui.stats["memory"] += 1
+        game.click(tile[0], tile[1])
+    elif n <= 1:
         game.click(*_at(game, img, FIRST_RESULT_ALONE))
     else:
         # several artists match: the tile whose name (the first line of a tile) is the

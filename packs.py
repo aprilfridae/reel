@@ -7,6 +7,7 @@ from difflib import SequenceMatcher
 import cv2
 import numpy as np
 
+import mem_gui
 from game import HERE, TEMPLATES
 from ocr import read_text, read_words
 try:
@@ -187,6 +188,11 @@ def read_catch_popup_mem(game, mb, timeout=2.5):
 CLOSE_BUTTONS = ("close_daily", "close_gifts", "close_market", "close_menu")  # the menus' red X's differ
 
 
+def pack_title(pack):
+    """A pack's tile in the Packs menu is named after it: "blood_moon" -> "Blood Moon Pack"."""
+    return pack.replace("_", " ").title() + " Pack"
+
+
 def dismiss_reveal(game):
     """If a pack reveal ("Continue" / "Open Another") is on screen, click Continue. A
     reveal left open (e.g. the bot was stopped mid-session) covers everything else."""
@@ -202,13 +208,17 @@ def dismiss_reveal(game):
 
 def close_any_menu(game):
     """Close whatever menu is open (Packs, Card Market, Gifts, Daily...) with its red X,
-    and make sure it really closed: an open menu blocks the side buttons."""
+    and make sure it really closed: an open menu blocks the side buttons. The X is found in memory (any showing
+    "X" button), else by its picture."""
     dismiss_reveal(game)
     for _ in range(4):
         img = game.frame()
         h, w = img.shape[:2]
         middle = (w * 0.15, h * 0.1, w * 0.85, h * 0.9)
-        hit = next((x for x in (game.find(n, img, 0.85, region=middle) for n in CLOSE_BUTTONS) if x), None)
+        mem = mem_gui.locate(text="X")
+        if mem and not (middle[0] <= mem[0] <= middle[2] and middle[1] <= mem[1] <= middle[3]):
+            mem = None  # (only a menu's X, in the middle: the same place the pictures are looked for)
+        hit = mem_gui.either(mem, lambda: next((x for x in (game.find(n, img, 0.85, region=middle) for n in CLOSE_BUTTONS) if x), None))
         if not hit:
             return True
         game.click(hit[0], hit[1])
@@ -254,7 +264,8 @@ class Packs:
         return self.game.ui_scale(img)
 
     def menu_is_open(self, img):
-        return self.game.find("packs_header", img) is not None
+        # memory's "yes" is trusted; a "no" is checked on screen (so a renamed tile can't make it look closed)
+        return bool(mem_gui.showing("CardsUI", name="OpenAllTile")) or self.game.find("packs_header", img) is not None
 
     def _wait_menu(self, want_open, timeout=2.0):
         """Wait only as long as the Packs menu takes to appear / go: True when it's as wanted."""
@@ -280,7 +291,7 @@ class Packs:
                 g.park_mouse()
                 g.wait(1.0)
                 continue
-            hit = g.find("packs_button", img)
+            hit = mem_gui.either(mem_gui.locate(text="Packs", screen="CardsUI"), lambda: g.find("packs_button", img))
             if hit:
                 g.click(hit[0], hit[1])
                 g.park_mouse()
@@ -297,7 +308,7 @@ class Packs:
             img = g.frame()
             if not self.menu_is_open(img):
                 return
-            hit = g.find("close_menu", img)
+            hit = mem_gui.either(mem_gui.locate(text="X", screen="CardsUI"), lambda: g.find("close_menu", img))
             if hit:
                 g.click(hit[0], hit[1])
                 g.park_mouse()
@@ -334,6 +345,10 @@ class Packs:
         """With the menu open, scroll until the pack is found.
         Returns the (x, y) of its OPEN button, or None if it's missing or greyed out."""
         g = self.game
+        mem = mem_gui.locate(text="OPEN", within=pack_title(pack))  # its tile's OPEN button, if it's in view
+        if mem:
+            mem_gui.stats["memory"] += 1
+            return mem[0], mem[1]
         img = g.frame()
         btn, _ = self._open_button_under(img, pack)
         if btn:
@@ -562,6 +577,16 @@ def _find_place(game, img, place):
     return best
 
 
+def _place_spot(game, img, place):
+    """Where `place` is in the open Teleport list: from memory (its entry in TeleportUI), else read off the screen."""
+    mem = mem_gui.locate(text=place, screen="TeleportUI", exact=False)
+    return mem_gui.either(mem and (mem[0], mem[1]), lambda: _find_place(game, img, place))
+
+
+def _teleports_button(game, img):
+    return mem_gui.either(mem_gui.locate(name="TeleportBtn", screen="CardsUI"), lambda: game.find("teleports_button", img))
+
+
 def teleport(game, place, settle=1.5, poll=0.5):
     """Teleports menu -> `place` (e.g. "Fishing", "Spawn"). `settle` is how long to let
     the world load in afterwards, `poll` how often to look for the menu closing. The game may say
@@ -571,16 +596,16 @@ def teleport(game, place, settle=1.5, poll=0.5):
     close_any_menu(game)  # an open menu (e.g. the Card Market) covers the Teleports button
     for _ in range(4):
         img = game.frame()
-        spot = _find_place(game, img, place)
+        spot = _place_spot(game, img, place)
         if not spot:
-            hit = game.find("teleports_button", img)
+            hit = _teleports_button(game, img)
             if not hit:
                 game.wait(1)
                 continue
             game.click(hit[0], hit[1])
             game.wait(0.8)
             img = game.frame()
-            spot = _find_place(game, img, place)
+            spot = _place_spot(game, img, place)
             if not spot:
                 continue
         # Click the button's icon, left of the word: the leaderboard (if open) covers
@@ -595,13 +620,13 @@ def teleport(game, place, settle=1.5, poll=0.5):
         while time.time() < end:
             game.wait(poll)
             now = game.frame()
-            gone = gone + 1 if not _find_place(game, now, place) else 0
+            gone = gone + 1 if not _place_spot(game, now, place) else 0
             if gone >= 2:
                 game.wait(settle)  # let the world load in
                 return True
         # Still open, or nothing happened ("Wait a moment"): close the list and retry
-        if _find_place(game, game.frame(), place):
-            hit = game.find("teleports_button", game.frame())
+        if _place_spot(game, game.frame(), place):
+            hit = _teleports_button(game, game.frame())
             if hit:
                 game.click(hit[0], hit[1])
                 game.park_mouse()

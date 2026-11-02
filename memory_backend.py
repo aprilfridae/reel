@@ -23,6 +23,7 @@ import json
 import os
 import sys
 import threading
+import time
 
 import numpy as np
 
@@ -63,6 +64,7 @@ class MemoryBackend:
         self._abs_pos_off = None
         self._started = False
         self.cache_path = cache_path
+        self._cls_cache = {}  # instance address -> (class name, when read)
 
     # ---- lifecycle -------------------------------------------------------
     def start(self):
@@ -209,6 +211,19 @@ class MemoryBackend:
         return out
 
     def _class_name(self, inst):
+        # An object's class never changes while it exists: remembered for a minute (an address can be reused by a
+        # new object after the game rebuilds a menu, hence not for longer). Several reads saved per lookup.
+        hit = self._cls_cache.get(inst)
+        now = time.time()
+        if hit and now - hit[1] < 60:
+            return hit[0]
+        cls = self._class_name_read(inst)
+        if len(self._cls_cache) > 200000:
+            self._cls_cache.clear()
+        self._cls_cache[inst] = (cls, now)
+        return cls
+
+    def _class_name_read(self, inst):
         try:
             cd = self.r.u64(inst + 0x18)
             if not self._valid(cd):

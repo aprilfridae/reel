@@ -16,6 +16,8 @@ from difflib import SequenceMatcher
 import cv2
 import numpy as np
 
+import mem_gui
+import mem_market
 from game import HERE, TEMPLATES
 from ocr import read_text, read_words
 
@@ -215,11 +217,31 @@ def read_listing(game, img, bid):
     return card
 
 
+def page_cards(game, img):
+    """[(bid, card)] for the listings in view, bid = (x, y, card centre x): read from memory when it can read the
+    market (exact names, sellers, serials, prices, and "box", the card's edges), else by OCR around each BID button.
+    Cards cut off by the top of the grid are left for a later page, as before."""
+    h = img.shape[0]
+    s = game.ui_scale(img)
+    mem = mem_market.listings()
+    if mem:
+        mem_gui.stats["memory"] += 1
+        return [((c["bid"][0], c["bid"][1], c["cx"]), c) for c in mem
+                if (c["box"][1] if c.get("box") else c["bid"][1] + CARD_TOP * s) >= h * GRID_TOP]
+    return [(b, read_listing(game, img, b)) for b in bid_buttons(game, img) if b[1] + CARD_TOP * s >= h * GRID_TOP]
+
+
 def _dialog_text(game):
+    """(words with screen positions, all their text) of the bid window: from memory, else read off the screen."""
+    mem = mem_market.dialog_words()
+    if mem:
+        words = [w for w in mem if not w[0].startswith("<")]
+        return words, fix_numbers(" ".join(t for t, _, _ in words))
     img = game.frame()
     h, w = img.shape[:2]
-    words = read_words(img[int(h * 0.3):int(h * 0.75), int(w * 0.25):int(w * 0.75)], scale=2)
-    return words, fix_numbers(" ".join(t for t, _, _ in words)), (w, h)
+    x0, y0 = int(w * 0.25), int(h * 0.3)
+    words = [(t, x0 + x, y0 + y) for t, x, y in read_words(img[y0:int(h * 0.75), x0:int(w * 0.75)], scale=2)]
+    return words, fix_numbers(" ".join(t for t, _, _ in words))
 
 
 def top_bidder(game, bid):
@@ -228,15 +250,14 @@ def top_bidder(game, bid):
     close), instead of fixed pauses."""
     game.click(bid[0], bid[1])
     game.park_mouse()
-    words = text = size = None
+    words = text = None
     end = time.time() + 2.0
     game.wait(0.2)
     while time.time() < end:
-        words, text, size = _dialog_text(game)
+        words, text = _dialog_text(game)
         if re.search(r"Top\s*bid|Starting\s*bid", text, re.I):
             break
         game.wait(0.05)
-    w, h = size
     result = {}
     m = re.search(r"Top\s*bid:?\s*([\d.,]+\s*[KMBTQ]?)\s*by\s+(\S+)", text, re.I)
     if m:
@@ -252,12 +273,12 @@ def top_bidder(game, bid):
         result["min_next_bid"] = m.group(1).replace(" ", "")
     cancel = [(x, y) for t, x, y in words if t.lower().startswith("cancel")]
     if cancel:
-        game.click(int(w * 0.25) + cancel[0][0], int(h * 0.3) + cancel[0][1])
+        game.click(*cancel[0])
     game.park_mouse()
     end = time.time() + 1.2
     while time.time() < end:  # until the window is gone
         game.wait(0.05)
-        _, text2, _ = _dialog_text(game)
+        _, text2 = _dialog_text(game)
         if not re.search(r"Top\s*bid|Starting\s*bid|need\s+at\s+least", text2, re.I):
             break
     return result
@@ -280,7 +301,7 @@ def wait_for_listings(game, timeout=10):
     """The market shows "Nothing for sale yet" for a moment while it loads."""
     end = time.time() + timeout
     while time.time() < end:
-        if bid_buttons(game, game.frame()):
+        if mem_market.listings() or bid_buttons(game, game.frame()):
             return True
         game.wait(0.5)
     return False
@@ -291,6 +312,18 @@ def set_sort_lowest_serial(game):
     # "Lowest" is read as Louest, Leuest...; "serial" is the only option with that word, so the option is found by it
     serial = re.compile(r"^seri[a-z]{0,2}$", re.I)
     wait_for_listings(game)
+    for _ in range(3):  # from memory: the sort label says what it's set to, and the option is found by its text
+        label = mem_gui.read(text="Sort:", screen="MarketUI")
+        if not label:
+            break
+        if "lowest serial" in label[0].lower():
+            return True
+        game.click(label[1], label[2])
+        game.wait(0.8)
+        opt = mem_gui.locate(text="Lowest serial", screen="MarketUI")
+        game.click(*(opt[:2] if opt else label[1:]))  # (no option: close the dropdown and look again)
+        game.park_mouse()
+        game.wait(1.5)
     for _ in range(3):
         words = read_words(game.frame(), scale=2)
         sort = [(i, x, y) for i, (t, x, y) in enumerate(words) if t.startswith("Sort")]
@@ -363,6 +396,21 @@ def find_listing(game, want, tries=3):
     return None, None
 
 
+def _to_top(game, mid):
+    """Scroll the grid back to its top. The list grows with each "Show more" (a scan leaves it ~50 notches down), so
+    one fixed scroll may not reach it: scroll until the listings in view stop changing (four scrolls if memory
+    can't read them)."""
+    before = None
+    for i in range(8):
+        game.scroll(*mid, 30, check=False)  # (the market is open)
+        game.wait(0.4)
+        now = [(c.get("name"), c.get("serial")) for c in mem_market.listings() or []]
+        if (now and now == before) or (not now and i >= 3):
+            break
+        before = now
+    game.wait(0.2)
+
+
 def _find_once(game, want, strict=False, max_pages=60):
     """Go through the (lowest-serial sorted) market, pressing "Show more" as needed,
     for the listing the website asked about. Returns (bid_button, card) or (None, None).
@@ -371,19 +419,14 @@ def _find_once(game, want, strict=False, max_pages=60):
     img = game.frame()
     h, w = img.shape[:2]
     mid = (w / 2, h * 0.55)
-    game.scroll(*mid, 30)
-    game.wait(0.6)
+    _to_top(game, mid)
     want = dict(want)
     want.setdefault("price", _price(want))
     stale = past = 0
     for _ in range(max_pages):
         img = game.frame()
-        s = game.ui_scale(img)
         new = False
-        for bid in bid_buttons(game, img):
-            if bid[1] + CARD_TOP * s < h * GRID_TOP:
-                continue
-            card = read_listing(game, img, bid)
+        for bid, card in page_cards(game, img):
             if _is_wanted(card, want):
                 return bid, card
             new = True
@@ -404,7 +447,14 @@ def _find_once(game, want, strict=False, max_pages=60):
     return None, None
 
 
-def _dialog_words(game):
+def _dialog_words(game, memory=True):
+    """The bid / buy window's words with their screen positions: from memory (whole labels, exact) when it can
+    read the window, else read off the screen. memory=False: the screen only (the buy window's checks go word
+    by word)."""
+    mem = mem_market.dialog_words() if memory else None
+    if mem:
+        mem_gui.stats["memory"] += 1
+        return [w for w in mem if not w[0].startswith("<")]
     img = game.frame()
     h, w = img.shape[:2]
     x0, y0 = int(w * 0.2), int(h * 0.25)
@@ -446,26 +496,34 @@ def place_bid(game, want, amount, dry_run=False):
     if target < amount_value(need.group(1)):
         _cancel_dialog(game)
         return False, f"too low: you need at least {need.group(1).replace(' ', '')}"
+    s = game.ui_scale(game.frame())
+    mem = mem_market.dialog_words() or []
+    mem_box = next(((x, y) for t, x, y in mem if t == "<textbox>"), None)  # the amount box, from memory
     mins = [(x, y) for t, x, y in words if t.lower() == "min"]
-    if not mins:
+    if mem_box:
+        box = mem_box
+    elif mins:
+        box = (mins[0][0] + 113 * s, mins[0][1] - 48 * s)  # the amount box sits above Min / +25% / x2
+    else:
         _cancel_dialog(game)
         return False, "couldn't find the amount box"
-    s = game.ui_scale(game.frame())
-    box = (mins[0][0] + 113 * s, mins[0][1] - 48 * s)  # the amount box sits above Min / +25% / x2
     game.click(*box)
     game.wait(0.2)
     clear_field()
     type_text(amount)
     game.wait(0.4)
     # The text is typed by the program, so it isn't read back with OCR (which can't read a
-    # short number like "5T" anyway). All that's checked is that something did get typed:
-    # the box has white text in it (it's dark and empty otherwise).
+    # short number like "5T" anyway). Memory reads the box exactly; without it, all that's checked
+    # is that something did get typed: the box has white text in it (it's dark and empty otherwise).
     bx, by = int(box[0]), int(box[1])
     for attempt in range(3):
         img = game.frame()
+        typed = next((t[len("<typed>"):] for t, x, y in (mem_market.dialog_words() or []) if t.startswith("<typed>")), None)
+        if typed is not None and typed.replace(" ", "").upper() == amount.replace(" ", "").upper():
+            break  # memory reads exactly what's in the box
         region = img[by - int(14 * s):by + int(14 * s), bx - int(160 * s):bx + int(160 * s)]
         if (region.min(axis=2) > 200).sum() >= 6 * s * s:
-            break
+            break  # (or: there's white text in the box)
         game.click(*box)  # nothing in the box: the click or the typing missed; do it again
         game.wait(0.3)
         clear_field()
@@ -506,12 +564,12 @@ def buy_now(game, want, price, dry_run=False):
     if amount_value(card["buy_now"]) != target:
         return False, f"Buy Now price is now {card['buy_now']}, not {price}; didn't buy"
     s = game.ui_scale(game.frame())
-    game.click(bid[0] + 85 * s, bid[1])  # BUY sits right of BID
+    game.click(*(card.get("buy") or (bid[0] + 85 * s, bid[1])))  # (memory knows the BUY button; else right of BID)
     game.park_mouse()
     game.wait(1.0)
     # The confirmation window: "Buy <name>?  Price: 1.0T coins  Sold by X" with
-    # [Cancel] and a green [BUY 1.0T] button at the bottom
-    words = _dialog_words(game)
+    # [Cancel] and a green [BUY 1.0T] button at the bottom (read off the screen: its checks go word by word)
+    words = _dialog_words(game, memory=False)
     title = _buy_title(words)
     cancel = [(x, y) for t, x, y in words if t.lower().startswith("cancel")]
     if not title or not cancel:
@@ -593,7 +651,11 @@ def _similar_key(a, b):
 
 
 def _show_more(img):
-    """Center of the "Show more (N)" button if it's on screen."""
+    """Center of the "Show more (N)" button if it's on screen (memory, else read off the screen)."""
+    mem = mem_gui.locate(text="Show more", screen="MarketUI", exact=False)
+    if mem:
+        mem_gui.stats["memory"] += 1
+        return mem[0], mem[1]
     h, w = img.shape[:2]
     x0, y0 = int(w * 0.15), int(h * GRID_TOP)
     words = read_words(img[y0:int(h * 0.9), x0:int(w * 0.85)], scale=2)
@@ -636,7 +698,7 @@ def scan(game, read_bidders=True, max_pages=60, log=print, should_stop=lambda: F
     img = game.frame()
     h, w = img.shape[:2]
     grid_mid = (w / 2, h * 0.55)
-    game.scroll(*grid_mid, 30, check=False)  # back to the top
+    _to_top(game, grid_mid)
     _settle_grid(game, 1.0)
     found, seen = [], set()
     done = False
@@ -651,10 +713,7 @@ def scan(game, read_bidders=True, max_pages=60, log=print, should_stop=lambda: F
         if DEBUG_PAGES:
             cv2.imwrite(os.path.join(HERE, f"scan_page_{page:02d}.jpg"), cv2.resize(img, None, fx=0.5, fy=0.5))
         new = 0
-        for bid in bid_buttons(game, img):
-            if bid[1] + CARD_TOP * s < h * GRID_TOP:
-                continue  # card cut off at the top; it's read fully on another page
-            card = read_listing(game, img, bid)
+        for bid, card in page_cards(game, img):  # (a card cut off at the top is read fully on another page)
             # Same listing seen again on another scroll position? Artwork can be
             # animated, so match on what doesn't change: serial, seller and price
             key = (card["serial"], (card.get("seller") or "").lower()[:10],
@@ -674,8 +733,12 @@ def scan(game, read_bidders=True, max_pages=60, log=print, should_stop=lambda: F
             # a picture of just the card for the website (names in fancy fonts don't
             # OCR well): from its top edge down to where the price box starts
             cx = bid[2]
-            thumb = img[max(0, int(bid[1] + CARD_BOTTOM_TOP[0] * s)):int(bid[1] + CARD_BOTTOM_TOP[1] * s),
-                        int(cx - CARD_HALF_W * s):int(cx + CARD_HALF_W * s)]
+            if card.get("box"):  # memory knows the card's edges
+                x0, y0, x1, y1 = (int(v) for v in card["box"])
+                thumb = img[max(0, y0):y1, max(0, x0):x1]
+            else:
+                thumb = img[max(0, int(bid[1] + CARD_BOTTOM_TOP[0] * s)):int(bid[1] + CARD_BOTTOM_TOP[1] * s),
+                            int(cx - CARD_HALF_W * s):int(cx + CARD_HALF_W * s)]
             card["image"] = f"card_{len(found):03d}.jpg"
             os.makedirs(CARDS_DIR, exist_ok=True)
             # (twice the size, so it stays sharp when the website shows it enlarged)
@@ -695,7 +758,8 @@ def scan(game, read_bidders=True, max_pages=60, log=print, should_stop=lambda: F
             secs = left_seconds(card.get("time_left"))
             if secs is not None:
                 card["ends_ts"] = time.time() + secs  # for the website's live countdown
-            card.pop("raw", None)
+            for k in ("raw", "bid", "buy", "box", "cx", "auction_only"):  # (only for finding it on screen)
+                card.pop(k, None)
             found.append(card)
         if done:
             break

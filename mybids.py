@@ -9,6 +9,7 @@ import time
 
 import cv2
 
+import mem_gui
 import webstate
 from game import HERE
 from market_scan import amount_value, badge_serial, fix_numbers, left_seconds, time_text
@@ -34,9 +35,11 @@ def _open_tab(game, label):
     img = game.frame()
     h = img.shape[0]
     s = game.ui_scale(img)
+    mem = mem_gui.locate(text=label, screen="MarketUI", contains=True)  # (its label starts with an emoji)
     # (the market window is centred, so its rows are placed from the screen's middle, not as a share of its height:
     # the tab row is 294 px above the middle at UI scale 1 whatever the window size, in fullscreen or not)
-    spot = next(((x, y) for t, x, y in read_words(img, scale=2) if label.lower() in t.lower() and y < h / 2 - 200 * s), None)
+    spot = mem_gui.either(mem and (mem[0], mem[1]), lambda: next(
+        ((x, y) for t, x, y in read_words(img, scale=2) if label.lower() in t.lower() and y < h / 2 - 200 * s), None))
     if not spot:
         return False
     game.click(*spot)
